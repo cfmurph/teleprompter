@@ -36,12 +36,15 @@ interface MusicSyncPanelProps {
 // ─── BPM Tab ─────────────────────────────────────────────────────────────────
 
 function BpmTab({
+  scriptId,
   onScrollSpeedChange,
 }: {
+  scriptId: string;
   onScrollSpeedChange: (speed: number) => void;
 }) {
-  const { performSettings, updatePerformSettings } = useStore();
-  const [bpm, setBpm] = useState(120);
+  const { scripts, performSettings, updatePerformSettings, updateScript } = useStore();
+  const script = scripts[scriptId];
+  const bpm = script?.bpm ?? 120;
   const [linesPerBeat, setLinesPerBeat] = useState(1);
   const [active, setActive] = useState(false);
   const tapRef = useRef(new TapTempo());
@@ -61,12 +64,15 @@ function BpmTab({
     updatePerformSettings({ scrollSpeed: speed });
   }
 
+  function setBpmValue(v: number) {
+    const next = Math.max(20, Math.min(300, v));
+    updateScript(scriptId, { bpm: next });
+    if (active) apply(next, linesPerBeat);
+  }
+
   function handleTap() {
     const result = tapRef.current.tap();
-    if (result) {
-      setBpm(result);
-      if (active) apply(result, linesPerBeat);
-    }
+    if (result) setBpmValue(result);
   }
 
   function toggle() {
@@ -97,9 +103,7 @@ function BpmTab({
             max={300}
             value={bpm}
             onChange={(e) => {
-              const v = parseInt(e.target.value) || 120;
-              setBpm(v);
-              if (active) apply(v, linesPerBeat);
+              setBpmValue(parseInt(e.target.value) || 120);
             }}
             className="w-20 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-center font-mono"
           />
@@ -117,9 +121,7 @@ function BpmTab({
           step={1}
           value={bpm}
           onChange={(e) => {
-            const v = parseInt(e.target.value);
-            setBpm(v);
-            if (active) apply(v, linesPerBeat);
+            setBpmValue(parseInt(e.target.value));
           }}
           className="w-full accent-blue-500"
         />
@@ -581,7 +583,7 @@ export default function MusicSyncPanel({
       {/* Tab content */}
       <div className="p-4 max-h-[70vh] overflow-y-auto">
         {tab === "bpm" && (
-          <BpmTab onScrollSpeedChange={onScrollSpeedChange} />
+          <BpmTab scriptId={scriptId} onScrollSpeedChange={onScrollSpeedChange} />
         )}
         {tab === "smpte" && (
           <SmpteTab scriptId={scriptId} onSectionChange={onSectionChange} />

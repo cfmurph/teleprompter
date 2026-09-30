@@ -45,6 +45,7 @@ export interface Script {
   artist?: string;     // Artist / performer name
   hasChords?: boolean; // Whether sections use ChordPro notation
   smpteCues?: SmpteCue[];
+  durationMs?: number; // Expected song length; clock and lyric mapping use this
 }
 
 export type SmpteFps = 24 | 25 | 29.97 | 30;
@@ -71,8 +72,16 @@ export interface Setlist {
   date: string;        // ISO date: "2026-09-21"
   venue: string;
   scriptIds: string[]; // Ordered song IDs
+  songSync?: Record<string, SongSync>; // Per-song show overrides
   createdAt: number;
   updatedAt: number;
+}
+
+/** Show-level sync for one song in a setlist. Overrides the library chart. */
+export interface SongSync {
+  bpm?: number;
+  durationMs?: number;
+  smpteStart?: string; // HH:MM:SS:FF — clock origin for this song
 }
 
 // ─── Perform Settings ────────────────────────────────────────────────────────

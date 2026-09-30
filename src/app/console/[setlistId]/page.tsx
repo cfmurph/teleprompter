@@ -18,12 +18,23 @@ import { useStore } from "@/lib/store";
 import { ConsoleCommand, FontFamily, Script, SmpteFps } from "@/lib/types";
 import { useBroadcastSender } from "@/lib/broadcast";
 import { stripChords } from "@/lib/chord-utils";
+import { TapTempo, bpmToScrollSpeed } from "@/lib/bpm-sync";
+import {
+  clockFromElapsed,
+  countLyricLines,
+  durationFromBpm,
+  flattenLineIndex,
+  formatDurationInput,
+  lineAtFlatIndex,
+  msPerLyricLine,
+  parseDurationInput,
+  resolveSongSync,
+} from "@/lib/song-sync";
 import {
   LTCDecoder,
   LTCTimecode,
   detectedToSmpteFps,
   formatSmpte,
-  framesToTimecode,
   nominalFps,
   resolveActiveCue,
   timecodeToFrames,
@@ -37,6 +48,50 @@ const FPS_CHIPS: { label: string; fpsAuto: boolean; fps?: SmpteFps }[] = [
   { label: "29.97", fpsAuto: false, fps: 29.97 },
   { label: "30", fpsAuto: false, fps: 30 },
 ];
+
+const LINES_PER_BEAT = [0.5, 1, 1.5, 2] as const;
+
+type SyncMode = "bpm" | "smpte";
+
+function DurationField({
+  valueMs,
+  onCommit,
+  placeholder = "3:24",
+  className,
+}: {
+  valueMs: number;
+  onCommit: (raw: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const formatted = valueMs > 0 ? formatDurationInput(valueMs) : "";
+  const [draft, setDraft] = useState(formatted);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(formatted);
+  }, [formatted, focused]);
+
+  return (
+    <input
+      value={focused ? draft : formatted}
+      placeholder={placeholder}
+      onFocus={() => {
+        setFocused(true);
+        setDraft(formatted);
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        setFocused(false);
+        onCommit(draft);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+      className={className}
+    />
+  );
+}
 
 // ─── Script line flattening ───────────────────────────────────────────────────
 
@@ -69,11 +124,6 @@ function flattenScript(script: Script): ScriptRow[] {
     });
   });
   return rows;
-}
-
-function elapsedToSmpte(totalMs: number, fps: SmpteFps, dropFrame: boolean): string {
-  const totalFrames = Math.floor((Math.max(0, totalMs) / 1000) * nominalFps(fps));
-  return framesToTimecode(totalFrames, fps, dropFrame);
 }
 
 function BevelBtn({
@@ -122,6 +172,7 @@ function LeftRail({
     removeScriptFromSetlist,
     reorderSetlist,
     updateSetlist,
+    updateSongSync,
   } = useStore();
   const setlist = setlists[setlistId];
   const [catalogQuery, setCatalogQuery] = useState("");
@@ -197,21 +248,76 @@ function LeftRail({
       <div className="flex-1 min-h-0 overflow-y-auto">
         {songs.map((song, idx) => {
           const isActive = song.id === activeScriptId;
+          const sync = resolveSongSync(setlist, song);
           return (
             <button
               key={song.id}
               type="button"
               onClick={() => onSelect(song.id)}
-              className={`w-full text-left px-2 py-[4px] text-[11px] truncate flex items-center gap-1 ${
+              className={`w-full text-left px-2 py-[4px] text-[11px] flex items-center gap-1 ${
                 isActive ? "bg-[#1e5aa8] text-white" : "text-zinc-200 hover:bg-white/5"
               }`}
             >
               <span className="w-4 text-[10px] text-zinc-500 shrink-0">{idx + 1}</span>
-              <span className="truncate">{song.title}</span>
+              <span className="truncate flex-1 min-w-0">{song.title}</span>
+              <span className={`text-[10px] tabular-nums shrink-0 ${isActive ? "text-white/80" : "text-zinc-500"}`}>
+                {sync.bpm} · {sync.durationMs ? formatDurationInput(sync.durationMs) : "--:--"}
+              </span>
             </button>
           );
         })}
       </div>
+      {activeScriptId && scripts[activeScriptId] && (
+        <div className="px-2 py-1.5 border-t border-black/40 space-y-1 bg-[#333]">
+          <div className="text-[10px] font-semibold text-zinc-400">Song sync</div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-zinc-500 w-8">BPM</span>
+            <input
+              type="number"
+              min={20}
+              max={300}
+              value={resolveSongSync(setlist, scripts[activeScriptId]).bpm}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (Number.isFinite(v)) updateSongSync(setlistId, activeScriptId, { bpm: Math.max(20, Math.min(300, v)) });
+              }}
+              className="w-12 h-5 bg-[#1a1a1a] border border-black/50 rounded-sm text-center font-mono text-[11px] text-white select-text focus:outline-none"
+            />
+            <span className="text-[10px] text-zinc-500 ml-1">Time</span>
+            <DurationField
+              valueMs={resolveSongSync(setlist, scripts[activeScriptId]).durationMs}
+              onCommit={(raw) => {
+                const ms = parseDurationInput(raw);
+                if (ms != null) updateSongSync(setlistId, activeScriptId, { durationMs: ms });
+              }}
+              className="w-14 h-5 bg-[#1a1a1a] border border-black/50 rounded-sm text-center font-mono text-[11px] text-white select-text focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const song = scripts[activeScriptId];
+                if (!song) return;
+                const sync = resolveSongSync(setlist, song);
+                updateSongSync(setlistId, activeScriptId, {
+                  durationMs: durationFromBpm(countLyricLines(song), sync.bpm, 1),
+                });
+              }}
+              className="h-5 px-1 text-[9px] rounded-sm border bg-[#5c5c5c] border-[#6e6e6e] text-zinc-200"
+            >
+              from BPM
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-zinc-500 w-8">TC</span>
+            <input
+              value={resolveSongSync(setlist, scripts[activeScriptId]).smpteStart}
+              onChange={(e) => updateSongSync(setlistId, activeScriptId, { smpteStart: e.target.value })}
+              placeholder="00:00:00:00"
+              className="flex-1 h-5 bg-[#1a1a1a] border border-black/50 rounded-sm px-1 font-mono text-[11px] text-green-400 select-text focus:outline-none"
+            />
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-1 p-1.5 border-t border-black/40">
         <BevelBtn onClick={addSelected} className="w-7 px-0">
           <Plus className="h-3 w-3 mx-auto" />
@@ -344,11 +450,15 @@ function PreviewStage({
 function TransportDeck({
   isPlaying,
   displayTc,
+  durationMs,
+  remainingLabel,
   fps,
   fpsAuto,
   cueCount,
   timelineOpen,
-  speed,
+  syncMode,
+  bpm,
+  linesPerBeat,
   footerHidden,
   blanking,
   standBy,
@@ -363,23 +473,31 @@ function TransportDeck({
   onNextMarker,
   onPrevSong,
   onNextSong,
-  onSpeed,
   onFooter,
   onBlanking,
   onStandBy,
   onSync,
   onFps,
   onTimeline,
+  onSyncMode,
+  onBpm,
+  onTap,
+  onLinesPerBeat,
+  onDuration,
   onLayer,
   onMonitor,
 }: {
   isPlaying: boolean;
   displayTc: string;
+  durationMs: number;
+  remainingLabel: string;
   fps: SmpteFps;
   fpsAuto: boolean;
   cueCount: number;
   timelineOpen: boolean;
-  speed: number;
+  syncMode: SyncMode;
+  bpm: number;
+  linesPerBeat: number;
   footerHidden: boolean;
   blanking: boolean;
   standBy: boolean;
@@ -394,66 +512,159 @@ function TransportDeck({
   onNextMarker: () => void;
   onPrevSong: () => void;
   onNextSong: () => void;
-  onSpeed: (n: number) => void;
   onFooter: () => void;
   onBlanking: () => void;
   onStandBy: () => void;
   onSync: () => void;
   onFps: (fpsAuto: boolean, fps?: SmpteFps) => void;
   onTimeline: () => void;
+  onSyncMode: (mode: SyncMode) => void;
+  onBpm: (bpm: number) => void;
+  onTap: () => void;
+  onLinesPerBeat: (n: number) => void;
+  onDuration: (raw: string) => void;
   onLayer: (l: "A" | "B") => void;
   onMonitor: () => void;
 }) {
   return (
     <div className="shrink-0 bg-[#3f3f3f] border-t border-black/40 px-3 py-2 space-y-2">
       <div className="flex items-center gap-2">
-        <BevelBtn active={syncOn} onClick={onSync} className="h-8 px-4 font-semibold">
-          Sync
+        <BevelBtn active={syncMode === "bpm"} onClick={() => onSyncMode("bpm")} className="h-8 px-3 font-semibold">
+          BPM
         </BevelBtn>
-        <div className="flex-1 bg-[#2a2a2a] border border-black/50 rounded-sm h-8 flex items-center gap-2 px-2 min-w-0">
-          <div className="flex items-center gap-0.5 shrink-0">
-            <span className="text-[10px] text-zinc-500 mr-0.5">FPS</span>
-            {FPS_CHIPS.map((chip) => {
-              const active = chip.fpsAuto ? fpsAuto : !fpsAuto && chip.fps === fps;
-              return (
-                <button
-                  key={chip.label}
-                  type="button"
-                  onClick={() => onFps(chip.fpsAuto, chip.fps)}
-                  className={`h-5 px-1.5 text-[10px] rounded-sm border ${
-                    active
-                      ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
-                      : "border-transparent text-zinc-500 hover:text-zinc-200"
-                  }`}
-                >
-                  {chip.label}
-                </button>
-              );
-            })}
+        <BevelBtn active={syncMode === "smpte"} onClick={() => onSyncMode("smpte")} className="h-8 px-3 font-semibold">
+          SMPTE
+        </BevelBtn>
+        {syncMode === "bpm" ? (
+          <div className="flex-1 bg-[#2a2a2a] border border-black/50 rounded-sm h-8 flex items-center gap-1.5 px-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => onBpm(bpm - 1)}
+              className="h-5 w-5 text-[12px] text-zinc-300 hover:text-white"
+              aria-label="Decrease BPM"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              min={20}
+              max={300}
+              value={bpm}
+              onChange={(e) => onBpm(parseInt(e.target.value, 10) || bpm)}
+              className="w-12 h-6 bg-[#1a1a1a] border border-black/50 rounded-sm text-center font-mono text-[13px] text-white select-text focus:outline-none focus:border-[#3d7ad1]"
+            />
+            <button
+              type="button"
+              onClick={() => onBpm(bpm + 1)}
+              className="h-5 w-5 text-[12px] text-zinc-300 hover:text-white"
+              aria-label="Increase BPM"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={onTap}
+              className="h-5 px-2 text-[10px] rounded-sm border bg-[#5c5c5c] border-[#6e6e6e] text-zinc-100 hover:bg-[#6a6a6a]"
+            >
+              Tap
+            </button>
+            <input
+              type="range"
+              min={40}
+              max={220}
+              value={Math.min(220, Math.max(40, bpm))}
+              onChange={(e) => onBpm(parseInt(e.target.value, 10))}
+              className="flex-1 min-w-[80px] accent-zinc-300 h-1"
+            />
+            <span className="text-[10px] text-zinc-500 shrink-0">lines/beat</span>
+            {LINES_PER_BEAT.map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => onLinesPerBeat(v)}
+                className={`h-5 px-1.5 text-[10px] rounded-sm border ${
+                  linesPerBeat === v
+                    ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
+                    : "border-transparent text-zinc-500 hover:text-zinc-200"
+                }`}
+              >
+                {v}×
+              </button>
+            ))}
           </div>
-          <span
-            className={`flex-1 text-center font-mono text-[15px] tracking-wider tabular-nums ${
-              syncOn ? "text-green-400" : "text-white"
-            }`}
-          >
-            {syncWaiting ? "Waiting LTC…" : displayTc}
-          </span>
-          <button
-            type="button"
-            onClick={onTimeline}
-            className={`shrink-0 h-5 px-2 text-[10px] rounded-sm border ${
-              timelineOpen
-                ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
-                : "border-transparent text-zinc-500 hover:text-zinc-200"
-            }`}
-          >
-            Timeline{cueCount ? ` (${cueCount})` : ""}
-          </button>
-        </div>
+        ) : (
+          <>
+            <BevelBtn active={syncOn} onClick={onSync} className="h-8 px-4 font-semibold">
+              Sync
+            </BevelBtn>
+            <div className="flex-1 bg-[#2a2a2a] border border-black/50 rounded-sm h-8 flex items-center gap-2 px-2 min-w-0">
+              <div className="flex items-center gap-0.5 shrink-0">
+                <span className="text-[10px] text-zinc-500 mr-0.5">FPS</span>
+                {FPS_CHIPS.map((chip) => {
+                  const active = chip.fpsAuto ? fpsAuto : !fpsAuto && chip.fps === fps;
+                  return (
+                    <button
+                      key={chip.label}
+                      type="button"
+                      onClick={() => onFps(chip.fpsAuto, chip.fps)}
+                      className={`h-5 px-1.5 text-[10px] rounded-sm border ${
+                        active
+                          ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
+                          : "border-transparent text-zinc-500 hover:text-zinc-200"
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <span
+                className={`flex-1 text-center font-mono text-[15px] tracking-wider tabular-nums ${
+                  syncOn ? "text-green-400" : "text-white"
+                }`}
+              >
+                {syncWaiting ? "Waiting LTC…" : displayTc}
+              </span>
+              <button
+                type="button"
+                onClick={onTimeline}
+                className={`shrink-0 h-5 px-2 text-[10px] rounded-sm border ${
+                  timelineOpen
+                    ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
+                    : "border-transparent text-zinc-500 hover:text-zinc-200"
+                }`}
+              >
+                Timeline{cueCount ? ` (${cueCount})` : ""}
+              </button>
+            </div>
+          </>
+        )}
       </div>
       {syncError && (
         <p className="text-[10px] text-red-400 px-1">{syncError}</p>
       )}
+
+      <div className="flex items-center gap-2 bg-[#2a2a2a] border border-black/50 rounded-sm h-10 px-2">
+        <span
+          className={`flex-1 text-center font-mono text-[20px] tracking-wider tabular-nums ${
+            isPlaying || syncOn ? "text-green-400" : "text-white"
+          }`}
+        >
+          {syncWaiting ? "Waiting LTC…" : displayTc}
+        </span>
+        <span className="text-zinc-600">/</span>
+        <label className="flex items-center gap-1 shrink-0 text-[10px] text-zinc-500">
+          Time
+          <DurationField
+            valueMs={durationMs}
+            onCommit={onDuration}
+            className="w-14 h-6 bg-[#1a1a1a] border border-black/50 rounded-sm text-center font-mono text-[13px] text-white select-text focus:outline-none focus:border-[#3d7ad1]"
+          />
+        </label>
+        <span className="text-[11px] text-zinc-400 tabular-nums w-16 text-right shrink-0">
+          {remainingLabel}
+        </span>
+      </div>
 
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
         <div className="flex flex-col gap-1">
@@ -468,7 +679,9 @@ function TransportDeck({
           className="h-[72px] w-[140px] rounded-sm bg-[#5c5c5c] border border-[#6e6e6e] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] text-white hover:bg-[#6a6a6a]"
         >
           <div className="text-[22px] font-semibold leading-none">{isPlaying ? "Pause" : "Start"}</div>
-          <div className="text-[11px] text-zinc-300 mt-1">{isPlaying ? "Running" : "Paused"}</div>
+          <div className={`text-[11px] mt-1 font-mono tabular-nums ${isPlaying ? "text-green-400" : "text-zinc-300"}`}>
+            {displayTc}
+          </div>
         </button>
 
         <div className="flex flex-col gap-1">
@@ -478,19 +691,6 @@ function TransportDeck({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-1">
-        <span className="text-[10px] text-zinc-400 w-8">Slow</span>
-        <input
-          type="range"
-          min={10}
-          max={300}
-          value={speed}
-          onChange={(e) => onSpeed(parseInt(e.target.value, 10))}
-          className="flex-1 accent-zinc-300 h-1"
-        />
-        <span className="text-[10px] text-zinc-400 w-8 text-right">Fast</span>
-      </div>
-
       <div className="flex items-center gap-1.5">
         <BevelBtn onClick={onFooter} className="h-8 px-3 leading-tight">
           <div>Footer</div>
@@ -498,7 +698,7 @@ function TransportDeck({
         </BevelBtn>
         <BevelBtn className="h-8 px-3 leading-tight">
           <div>Elapsed</div>
-          <div className="text-[9px] text-zinc-300">{isPlaying ? "Running" : "Paused"}</div>
+          <div className={`text-[9px] font-mono ${isPlaying ? "text-green-300" : "text-zinc-300"}`}>{displayTc}</div>
         </BevelBtn>
         <BevelBtn onClick={onBlanking} className="h-8 px-3 leading-tight">
           <div>Blanking</div>
@@ -525,6 +725,8 @@ function ScriptPanel({
   moveToLine,
   onToMonitor,
   onMoveToLine,
+  onBpm,
+  onDuration,
 }: {
   script: Script | null;
   sectionIndex: number;
@@ -534,6 +736,8 @@ function ScriptPanel({
   moveToLine: boolean;
   onToMonitor: () => void;
   onMoveToLine: () => void;
+  onBpm: (bpm: number) => void;
+  onDuration: (raw: string) => void;
 }) {
   const { performSettings, updatePerformSettings, updateSection, updateScript } = useStore();
   const activeRef = useRef<HTMLInputElement | null>(null);
@@ -592,11 +796,37 @@ function ScriptPanel({
     <div className="w-full min-w-0 flex flex-col bg-[#3a3a3a] border-l border-black/40">
       <div className="px-2 py-1.5 border-b border-black/30">
         {script ? (
-          <input
-            value={script.title}
-            onChange={(e) => updateScript(script.id, { title: e.target.value })}
-            className="w-full bg-transparent text-[12px] font-semibold text-zinc-200 focus:outline-none"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              value={script.title}
+              onChange={(e) => updateScript(script.id, { title: e.target.value })}
+              className="flex-1 min-w-0 bg-transparent text-[12px] font-semibold text-zinc-200 focus:outline-none"
+            />
+            <label className="flex items-center gap-1 shrink-0 text-[10px] text-zinc-500">
+              BPM
+              <input
+                type="number"
+                min={20}
+                max={300}
+                value={script.bpm ?? ""}
+                placeholder="—"
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const v = parseInt(raw, 10);
+                  if (Number.isFinite(v)) onBpm(v);
+                }}
+                className="w-12 h-5 bg-[#1a1a1a] border border-black/50 rounded-sm text-center font-mono text-[11px] text-white select-text focus:outline-none focus:border-[#3d7ad1]"
+              />
+            </label>
+            <label className="flex items-center gap-1 shrink-0 text-[10px] text-zinc-500">
+              Time
+              <DurationField
+                valueMs={script.durationMs ?? 0}
+                onCommit={onDuration}
+                className="w-14 h-5 bg-[#1a1a1a] border border-black/50 rounded-sm text-center font-mono text-[11px] text-white select-text focus:outline-none focus:border-[#3d7ad1]"
+              />
+            </label>
+          </div>
         ) : (
           <span className="text-[12px] font-semibold text-zinc-500">No song</span>
         )}
@@ -720,9 +950,11 @@ export default function ConsolePage({
     prevLine,
     performSettings,
     updatePerformSettings,
+    updateScript,
     smpteSettings,
     updateSmpteSettings,
     setSmpteCues,
+    updateSongSync,
   } = useStore();
 
   const { send } = useBroadcastSender(setlistId);
@@ -735,22 +967,33 @@ export default function ConsolePage({
   const [syncError, setSyncError] = useState<string | null>(null);
   const [ltcTc, setLtcTc] = useState<LTCTimecode | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [syncMode, setSyncMode] = useState<SyncMode>("bpm");
+  const [linesPerBeat, setLinesPerBeat] = useState(1);
   const [layer, setLayer] = useState<"A" | "B">("A");
   const [toMonitor, setToMonitor] = useState(true);
   const [moveToLine, setMoveToLine] = useState(true);
 
   const decoderRef = useRef<LTCDecoder | null>(null);
   const lastCueRef = useRef<string | null>(null);
+  const lastFlatRef = useRef(-1);
   const elapsedRef = useRef(0);
+  const tapRef = useRef(new TapTempo());
+  const lastClockSentRef = useRef("");
   elapsedRef.current = elapsedMs;
 
   const setlist = setlists[setlistId];
   const activeScript = activeScriptId ? scripts[activeScriptId] : null;
   const cues = activeScript?.smpteCues ?? [];
   const fps = smpteSettings.fps;
+  const songSync = resolveSongSync(setlist, activeScript);
+  const bpm = Math.max(20, Math.min(300, songSync.bpm));
+  const durationMs = songSync.durationMs;
+  const lineCount = activeScript ? countLyricLines(activeScript) : 0;
   const displayTc = ltcTc
     ? formatSmpte(ltcTc.hours, ltcTc.minutes, ltcTc.seconds, ltcTc.frames, smpteSettings.dropFrame || ltcTc.dropFrame)
-    : elapsedToSmpte(elapsedMs, fps, smpteSettings.dropFrame);
+    : clockFromElapsed(elapsedMs, songSync.smpteStart, fps, smpteSettings.dropFrame);
+  const remainingMs = durationMs > 0 ? Math.max(0, durationMs - elapsedMs) : 0;
+  const remainingLabel = durationMs > 0 ? `-${formatDurationInput(remainingMs)}` : "";
 
   useEffect(() => {
     if (!activeScriptId && setlist?.scriptIds.length) {
@@ -849,22 +1092,62 @@ export default function ConsolePage({
 
   const frameRef = useRef(handleLtcFrame);
   frameRef.current = handleLtcFrame;
+  const dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
+  const sendRef = useRef(send);
+  sendRef.current = send;
 
   useEffect(() => {
     lastCueRef.current = null;
+    lastFlatRef.current = -1;
+    tapRef.current.reset();
   }, [activeScriptId]);
 
   useEffect(() => {
     if (!isPlaying || syncOn) return;
+    const script = activeScript;
     const origin = performance.now() - elapsedRef.current;
+    const perLine = msPerLyricLine(durationMs, lineCount, bpm, linesPerBeat);
+    const startTc = songSync.smpteStart;
+    const drop = smpteSettings.dropFrame;
     let raf = 0;
     const tick = (now: number) => {
-      setElapsedMs(now - origin);
+      const raw = now - origin;
+      const capped = durationMs > 0 ? Math.min(raw, durationMs) : raw;
+      setElapsedMs(capped);
+      if (script && lineCount > 0 && perLine > 0) {
+        const flat = Math.min(lineCount - 1, Math.floor(capped / perLine));
+        if (flat !== lastFlatRef.current) {
+          lastFlatRef.current = flat;
+          const pos = lineAtFlatIndex(script, flat);
+          dispatchRef.current({
+            type: "GOTO_LINE",
+            sectionIndex: pos.sectionIndex,
+            lineIndex: pos.lineIndex,
+          });
+        }
+      }
+      const tc = clockFromElapsed(capped, startTc, fps, drop);
+      if (tc !== lastClockSentRef.current) {
+        lastClockSentRef.current = tc;
+        sendRef.current({ type: "SMPTE_LOCK", locked: true, timecode: tc });
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [isPlaying, syncOn]);
+  }, [
+    isPlaying,
+    syncOn,
+    durationMs,
+    lineCount,
+    bpm,
+    linesPerBeat,
+    activeScript,
+    fps,
+    songSync.smpteStart,
+    smpteSettings.dropFrame,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -923,6 +1206,60 @@ export default function ConsolePage({
       activeScript.id,
       cues.filter((c) => c.id !== id)
     );
+  }
+
+  function applyBpm(next: number) {
+    const value = Math.max(20, Math.min(300, Math.round(next)));
+    if (activeScript) {
+      updateSongSync(setlistId, activeScript.id, { bpm: value });
+      updateScript(activeScript.id, { bpm: value });
+    }
+    const speed = Math.round(
+      bpmToScrollSpeed({
+        bpm: value,
+        fontSize: performSettings.fontSize,
+        lineSpacing: performSettings.lineSpacing,
+        linesPerBeat,
+      })
+    );
+    updatePerformSettings({ scrollSpeed: speed });
+    send({ type: "UPDATE_SETTINGS", settings: { scrollSpeed: speed } });
+  }
+
+  function applyDuration(raw: string) {
+    const ms = parseDurationInput(raw);
+    if (ms == null || !activeScript) return;
+    updateSongSync(setlistId, activeScript.id, { durationMs: ms });
+    updateScript(activeScript.id, { durationMs: ms });
+  }
+
+  function jumpTo(si: number, li: number) {
+    dispatch({ type: "GOTO_LINE", sectionIndex: si, lineIndex: li });
+    if (!activeScript) return;
+    const count = countLyricLines(activeScript);
+    const flat = flattenLineIndex(activeScript, si, li);
+    const perLine = msPerLyricLine(durationMs, count, bpm, linesPerBeat);
+    lastFlatRef.current = flat;
+    setElapsedMs(flat * perLine);
+  }
+
+  function applyLinesPerBeat(next: number) {
+    setLinesPerBeat(next);
+    const speed = Math.round(
+      bpmToScrollSpeed({
+        bpm,
+        fontSize: performSettings.fontSize,
+        lineSpacing: performSettings.lineSpacing,
+        linesPerBeat: next,
+      })
+    );
+    updatePerformSettings({ scrollSpeed: speed });
+    send({ type: "UPDATE_SETTINGS", settings: { scrollSpeed: speed } });
+  }
+
+  function tapBpm() {
+    const result = tapRef.current.tap();
+    if (result) applyBpm(result);
   }
 
   function openDisplay() {
@@ -988,7 +1325,7 @@ export default function ConsolePage({
         </button>
       </header>
 
-      <div className="flex-1 grid grid-cols-[200px_minmax(0,1fr)_260px] min-h-0 min-w-0">
+      <div className="flex-1 grid grid-cols-[232px_minmax(0,1fr)_260px] min-h-0 min-w-0">
         <LeftRail
           setlistId={setlistId}
           activeScriptId={activeScriptId}
@@ -1007,7 +1344,7 @@ export default function ConsolePage({
             lineSpacing={performSettings.lineSpacing}
             fontFamily={performSettings.fontFamily}
           />
-          {timelineOpen && (
+          {timelineOpen && syncMode === "smpte" && (
             <SmpteTimeline
               script={activeScript}
               cues={cues}
@@ -1018,18 +1355,22 @@ export default function ConsolePage({
               onAdd={addCue}
               onUpdate={updateCue}
               onDelete={deleteCue}
-              onJump={(si, li) => dispatch({ type: "GOTO_LINE", sectionIndex: si, lineIndex: li })}
+              onJump={jumpTo}
               onDropFrame={(on) => updateSmpteSettings({ dropFrame: on })}
             />
           )}
           <TransportDeck
             isPlaying={isPlaying}
             displayTc={displayTc}
+            durationMs={durationMs}
+            remainingLabel={remainingLabel}
             fps={fps}
             fpsAuto={smpteSettings.fpsAuto}
             cueCount={cues.length}
             timelineOpen={timelineOpen}
-            speed={performSettings.scrollSpeed}
+            syncMode={syncMode}
+            bpm={bpm}
+            linesPerBeat={linesPerBeat}
             footerHidden={footerHidden}
             blanking={blanking}
             standBy={standBy}
@@ -1044,10 +1385,6 @@ export default function ConsolePage({
             onNextMarker={() => dispatch({ type: "NEXT_SECTION" })}
             onPrevSong={() => dispatch({ type: "PREV_SCRIPT" })}
             onNextSong={() => dispatch({ type: "NEXT_SCRIPT" })}
-            onSpeed={(n) => {
-              updatePerformSettings({ scrollSpeed: n });
-              send({ type: "UPDATE_SETTINGS", settings: { scrollSpeed: n } });
-            }}
             onFooter={() => setFooterHidden((v) => !v)}
             onBlanking={() => dispatch({ type: "BLANKING", on: !blanking })}
             onStandBy={() => dispatch({ type: "STANDBY", on: !standBy })}
@@ -1057,6 +1394,14 @@ export default function ConsolePage({
               else if (nextFps) updateSmpteSettings({ fpsAuto: false, fps: nextFps });
             }}
             onTimeline={() => setTimelineOpen((v) => !v)}
+            onSyncMode={(mode) => {
+              setSyncMode(mode);
+              if (mode === "bpm") setTimelineOpen(false);
+            }}
+            onBpm={applyBpm}
+            onTap={tapBpm}
+            onLinesPerBeat={applyLinesPerBeat}
+            onDuration={applyDuration}
             onLayer={setLayer}
             onMonitor={openDisplay}
           />
@@ -1066,11 +1411,13 @@ export default function ConsolePage({
           script={activeScript}
           sectionIndex={currentSectionIndex}
           lineIndex={currentLineIndex}
-          onJump={(si, li) => dispatch({ type: "GOTO_LINE", sectionIndex: si, lineIndex: li })}
+          onJump={jumpTo}
           toMonitor={toMonitor}
           moveToLine={moveToLine}
           onToMonitor={() => setToMonitor((v) => !v)}
           onMoveToLine={() => setMoveToLine((v) => !v)}
+          onBpm={applyBpm}
+          onDuration={applyDuration}
         />
       </div>
     </div>

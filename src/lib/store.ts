@@ -12,6 +12,7 @@ import {
   Setlist,
   SmpteSettings,
   SmpteCue,
+  SongSync,
 } from "./types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -171,6 +172,7 @@ function song(
   artist: string,
   key: string,
   bpm: number,
+  durationMs: number,
   sections: { id: string; type: SectionType; label: string; content: string }[]
 ): Script {
   return {
@@ -179,6 +181,7 @@ function song(
     artist,
     key,
     bpm,
+    durationMs,
     description: `${artist} — live chart`,
     tags: ["live", "setlist"],
     hasChords: false,
@@ -190,17 +193,17 @@ function song(
   };
 }
 
-const DEMO_SCRIPT_4 = song("demo-4", "Slow Me Down", "Original", "G", 92, [
+const DEMO_SCRIPT_4 = song("demo-4", "Slow Me Down", "Original", "G", 92, 198_000, [
   { id: "d4-s1", type: "verse", label: "Verse 1", content: "The night is moving faster than I am\nCity lights keep pulling at my hands\nIf I could hold this moment still\nI'd keep us right here on this hill" },
   { id: "d4-s2", type: "chorus", label: "Chorus", content: "Slow me down, don't let me run\nThere's a whole life left when this song is done\nSlow me down, stay in the sound\nI'm not ready to come down" },
 ]);
 
-const DEMO_SCRIPT_5 = song("demo-5", "Sick and Tired", "Original", "Em", 118, [
+const DEMO_SCRIPT_5 = song("demo-5", "Sick and Tired", "Original", "Em", 118, 176_000, [
   { id: "d5-s1", type: "verse", label: "Verse 1", content: "Same old room, same old ceiling fan\nTelling myself I still have a plan\nEvery clock is louder than the last\nI'm running out of easy alibis" },
   { id: "d5-s2", type: "chorus", label: "Chorus", content: "I'm sick and tired of waiting around\nFor a better version of right now\nIf this is all we get tonight\nThen turn it up and let it ride" },
 ]);
 
-const DEMO_SCRIPT_6 = song("demo-6", "Count On Me", "Original", "C", 89, [
+const DEMO_SCRIPT_6 = song("demo-6", "Count On Me", "Original", "C", 89, 204_000, [
   { id: "d6-s1", type: "verse", label: "Verse 1", content: "I know some days the world won't cut you slack\nI've seen the load you carry on your back\nIt knocks you down and spins you all around\nand still you find your way somehow" },
   { id: "d6-s2", type: "chorus", label: "Chorus", content: "You can count on me when the room goes quiet\nI'll be the light you don't have to find\nYou can count on me through the long remaining\nI won't leave you behind" },
   { id: "d6-s3", type: "verse", label: "Verse 2", content: "You said the floor kept falling away\nEvery good thing felt a little fake\nIf the night is long I'll stay awake\nYou don't have to carry the weight" },
@@ -213,12 +216,12 @@ DEMO_SCRIPT_6.smpteCues = [
   { id: "c6-4", timecode: "00:00:48:00", sectionIndex: 3, lineIndex: 0, label: "Chorus 2" },
 ];
 
-const DEMO_SCRIPT_7 = song("demo-7", "Somewhere", "Original", "D", 104, [
+const DEMO_SCRIPT_7 = song("demo-7", "Somewhere", "Original", "D", 104, 182_000, [
   { id: "d7-s1", type: "verse", label: "Verse 1", content: "Maps on the dash and a half-full tank\nWe left the last town without a plan\nIf home is a feeling not a place\nThen maybe we're already there" },
   { id: "d7-s2", type: "chorus", label: "Chorus", content: "Somewhere between the dark and the morning\nWe found a reason to stay\nSomewhere the radio keeps on playing\nAnd nothing gets in the way" },
 ]);
 
-const DEMO_SCRIPT_8 = song("demo-8", "Seize the Day", "Original", "A", 126, [
+const DEMO_SCRIPT_8 = song("demo-8", "Seize the Day", "Original", "A", 126, 161_000, [
   { id: "d8-s1", type: "verse", label: "Verse 1", content: "Don't wait for perfect weather\nThe sky is never going to stay\nPut your hands on the wheel now\nAnd take the long way anyway" },
   { id: "d8-s2", type: "chorus", label: "Chorus", content: "Seize the day before it fades\nEvery hour is a borrowed flame\nSing it loud, let it break\nThis is ours to take" },
 ]);
@@ -229,6 +232,9 @@ const DEMO_SETLIST: Setlist = {
   date: "2026-09-30",
   venue: "Default Timecode 1.2",
   scriptIds: ["demo-4", "demo-5", "demo-6", "demo-7", "demo-8", "demo-1"],
+  songSync: {
+    "demo-6": { bpm: 89, durationMs: 204_000, smpteStart: "00:00:00:00" },
+  },
   createdAt: now() - 60000,
   updatedAt: now() - 60000,
 };
@@ -282,6 +288,7 @@ interface StoreState {
   removeScriptFromSetlist: (setlistId: string, scriptId: string) => void;
   reorderSetlist: (setlistId: string, scriptIds: string[]) => void;
   setActiveSetlist: (id: string | null) => void;
+  updateSongSync: (setlistId: string, scriptId: string, updates: Partial<SongSync>) => void;
 
   // Script actions
   createScript: (partial?: Partial<Script>) => string;
@@ -398,6 +405,20 @@ export const useStore = create<StoreState>()(
         })),
 
       setActiveSetlist: (id) => set({ activeSetlistId: id }),
+
+      updateSongSync: (setlistId, scriptId, updates) =>
+        set((s) => {
+          const sl = s.setlists[setlistId];
+          if (!sl) return s;
+          const songSync = { ...(sl.songSync ?? {}) };
+          songSync[scriptId] = { ...songSync[scriptId], ...updates };
+          return {
+            setlists: {
+              ...s.setlists,
+              [setlistId]: { ...sl, songSync, updatedAt: now() },
+            },
+          };
+        }),
 
       // ── Scripts ───────────────────────────────────────────────────────────
 
@@ -644,6 +665,7 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: "teleprompter-v1",
+      skipHydration: true,
       storage: createJSONStorage(() => localStorage),
       merge: (persisted, current) => {
         const p = (persisted as Partial<StoreState> | undefined) ?? {};
@@ -652,6 +674,14 @@ export const useStore = create<StoreState>()(
         if (!setlists["setlist-demo"]) setlists["setlist-demo"] = DEMO_SETLIST;
         if (scripts["demo-6"] && !scripts["demo-6"].smpteCues?.length && DEMO_SCRIPT_6.smpteCues) {
           scripts["demo-6"] = { ...scripts["demo-6"], smpteCues: DEMO_SCRIPT_6.smpteCues };
+        }
+        for (const demo of [DEMO_SCRIPT_4, DEMO_SCRIPT_5, DEMO_SCRIPT_6, DEMO_SCRIPT_7, DEMO_SCRIPT_8]) {
+          if (scripts[demo.id] && !scripts[demo.id].durationMs && demo.durationMs) {
+            scripts[demo.id] = { ...scripts[demo.id], durationMs: demo.durationMs };
+          }
+        }
+        if (setlists["setlist-demo"] && !setlists["setlist-demo"].songSync) {
+          setlists["setlist-demo"] = { ...setlists["setlist-demo"], songSync: DEMO_SETLIST.songSync };
         }
         const smpteSettings = { ...current.smpteSettings, ...(p.smpteSettings ?? {}) };
         return { ...current, ...p, scripts, setlists, smpteSettings };
