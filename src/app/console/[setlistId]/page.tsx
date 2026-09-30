@@ -30,10 +30,13 @@ import {
   formatRemainingLabel,
   lineAtElapsed,
   parseDurationInput,
+  remapPlayback,
   resolveSongSync,
   shouldBroadcastClock,
+  usesInternalClock,
+  elapsedAfterSongChange,
 } from "@/lib/song-sync";
-import { smpteLockCommand } from "@/lib/console-commands";
+import { gotoLineCommand, gotoScriptCommand, smpteLockCommand } from "@/lib/console-commands";
 import {
   LTCDecoder,
   LTCTimecode,
@@ -974,7 +977,7 @@ export default function ConsolePage({
         case "GOTO_SCRIPT":
           setActiveScript(cmd.scriptId);
           setCurrentSection(0);
-          setElapsedMs(0);
+          setElapsedMs(elapsedAfterSongChange());
           break;
         case "GOTO_SECTION":
           setCurrentSection(cmd.index);
@@ -1001,7 +1004,7 @@ export default function ConsolePage({
           if (idx < setlist.scriptIds.length - 1) {
             setActiveScript(setlist.scriptIds[idx + 1]);
             setCurrentSection(0);
-            setElapsedMs(0);
+            setElapsedMs(elapsedAfterSongChange());
           }
           break;
         }
@@ -1011,7 +1014,7 @@ export default function ConsolePage({
           if (idx > 0) {
             setActiveScript(setlist.scriptIds[idx - 1]);
             setCurrentSection(0);
-            setElapsedMs(0);
+            setElapsedMs(elapsedAfterSongChange());
           }
           break;
         }
@@ -1066,7 +1069,7 @@ export default function ConsolePage({
   }, [activeScriptId]);
 
   useEffect(() => {
-    if (!isPlaying || syncOn) return;
+    if (!usesInternalClock(isPlaying, syncOn)) return;
     const script = activeScript;
     const origin = performance.now() - elapsedRef.current;
     const startTc = songSync.smpteStart;
@@ -1079,11 +1082,7 @@ export default function ConsolePage({
         const pos = lineAtElapsed(script, capped, durationMs, bpm, linesPerBeat);
         if (pos.flat !== lastFlatRef.current) {
           lastFlatRef.current = pos.flat;
-          dispatchRef.current({
-            type: "GOTO_LINE",
-            sectionIndex: pos.sectionIndex,
-            lineIndex: pos.lineIndex,
-          });
+          dispatchRef.current(gotoLineCommand(pos.sectionIndex, pos.lineIndex));
         }
       }
       const tc = clockFromElapsed(capped, startTc, fps, drop);
@@ -1196,8 +1195,9 @@ export default function ConsolePage({
     dispatch({ type: "GOTO_LINE", sectionIndex: si, lineIndex: li });
     if (!activeScript) return;
     const elapsed = elapsedForLine(activeScript, si, li, durationMs, bpm, linesPerBeat);
-    lastFlatRef.current = lineAtElapsed(activeScript, elapsed, durationMs, bpm, linesPerBeat).flat;
-    setElapsedMs(elapsed);
+    const remapped = remapPlayback(activeScript, elapsed, durationMs, bpm, linesPerBeat);
+    lastFlatRef.current = remapped.flat;
+    setElapsedMs(remapped.elapsed);
   }
 
   function applyLinesPerBeat(next: number) {
@@ -1286,7 +1286,7 @@ export default function ConsolePage({
         <LeftRail
           setlistId={setlistId}
           activeScriptId={activeScriptId}
-          onSelect={(id) => dispatch({ type: "GOTO_SCRIPT", scriptId: id })}
+          onSelect={(id) => dispatch(gotoScriptCommand(id))}
         />
 
         <div className="flex-1 flex flex-col min-w-0 min-h-0">

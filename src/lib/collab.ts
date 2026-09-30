@@ -58,18 +58,27 @@ function randomName(): string {
 
 // ─── Local user identity (persisted in session storage) ───────────────────────
 
+export function collabRoomName(roomId: string): string {
+  return `teleprompter-room-${roomId}`;
+}
+
+export function parseStoredUser(raw: string | null): CollabUser | null {
+  if (!raw) return null;
+  try {
+    const user = JSON.parse(raw) as CollabUser;
+    if (!user?.id || !user?.name) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
 function getLocalUser(): CollabUser {
   if (typeof window === "undefined") {
     return { id: "server", name: "Server", color: "#fff" };
   }
-  const stored = sessionStorage.getItem("collab-user");
-  if (stored) {
-    try {
-      return JSON.parse(stored) as CollabUser;
-    } catch {
-      // fall through
-    }
-  }
+  const stored = parseStoredUser(sessionStorage.getItem("collab-user"));
+  if (stored) return stored;
   const user: CollabUser = {
     id: crypto.randomUUID(),
     name: randomName(),
@@ -94,7 +103,7 @@ export function joinRoom(roomId: string): CollabState {
 
   const doc = new Y.Doc();
 
-  const provider = new WebrtcProvider(`teleprompter-room-${roomId}`, doc, {
+  const provider = new WebrtcProvider(collabRoomName(roomId), doc, {
     signaling: ["wss://webrtc.fly.dev"],
     password: undefined,
     awareness: {

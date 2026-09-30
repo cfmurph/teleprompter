@@ -161,11 +161,11 @@ export function downloadMarkdown(script: Script, includeChords = false) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function slugify(str: string): string {
+export function slugify(str: string): string {
   return str.toLowerCase().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").slice(0, 60);
 }
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

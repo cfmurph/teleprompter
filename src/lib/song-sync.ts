@@ -154,3 +154,29 @@ export function elapsedForLine(
 export function shouldBroadcastClock(previous: string, next: string): boolean {
   return previous !== next;
 }
+
+/** Internal rAF clock runs only while playing and LTC is off. */
+export function usesInternalClock(isPlaying: boolean, ltcSyncOn: boolean): boolean {
+  return isPlaying && !ltcSyncOn;
+}
+
+export function elapsedAfterSongChange(): number {
+  return 0;
+}
+
+export function playbackOrigin(nowMs: number, elapsedMs: number): number {
+  return nowMs - Math.max(0, elapsedMs);
+}
+
+/** Recompute line + cap when the operator changes Time/BPM mid-song. */
+export function remapPlayback(
+  script: Script,
+  elapsedMs: number,
+  durationMs: number,
+  bpm: number,
+  linesPerBeat: number
+): { elapsed: number; sectionIndex: number; lineIndex: number; flat: number } {
+  const elapsed = capElapsed(elapsedMs, durationMs);
+  const pos = lineAtElapsed(script, elapsed, durationMs, bpm, linesPerBeat);
+  return { elapsed, ...pos };
+}

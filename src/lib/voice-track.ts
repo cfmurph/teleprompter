@@ -32,16 +32,16 @@ export type VoiceTrackCallback = (state: VoiceTrackState) => void;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Normalize text for comparison: lowercase, strip punctuation */
-function normalize(text: string): string {
+export function normalizeSpoken(text: string): string {
   return text.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
 }
 
 /** Split content into words, tracking which line each word is on */
-function buildWordMap(content: string): { word: string; lineIndex: number }[] {
+export function buildWordMap(content: string): { word: string; lineIndex: number }[] {
   const map: { word: string; lineIndex: number }[] = [];
   const lines = content.split("\n");
   for (let li = 0; li < lines.length; li++) {
-    const words = normalize(lines[li]).split(" ").filter(Boolean);
+    const words = normalizeSpoken(lines[li]).split(" ").filter(Boolean);
     for (const word of words) {
       map.push({ word, lineIndex: li });
     }
@@ -53,15 +53,14 @@ function buildWordMap(content: string): { word: string; lineIndex: number }[] {
  * Find how many consecutive words from the content match the transcript.
  * Returns the index of the last matched word in the word map.
  */
-function matchTranscript(
+export function matchTranscript(
   wordMap: { word: string; lineIndex: number }[],
   transcript: string,
   startFrom: number
 ): number {
-  const spoken = normalize(transcript).split(" ").filter(Boolean);
+  const spoken = normalizeSpoken(transcript).split(" ").filter(Boolean);
   if (spoken.length === 0) return startFrom;
 
-  // Slide a window through the word map looking for the spoken words
   let bestMatch = startFrom;
 
   for (let i = startFrom; i < wordMap.length; i++) {

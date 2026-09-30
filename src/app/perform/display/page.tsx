@@ -10,7 +10,7 @@ import { Suspense, useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { useBroadcastReceiver } from "@/lib/broadcast";
-import { applySmpteLock } from "@/lib/console-commands";
+import { applyGotoLine, applySmpteLock } from "@/lib/console-commands";
 import { parseContent } from "@/lib/chord-utils";
 
 // ─── Color schemes ────────────────────────────────────────────────────────────
@@ -326,10 +326,12 @@ function DisplayInner() {
       case "SET_TRANSPOSE":
         setLocalTranspose(cmd.steps);
         break;
-      case "GOTO_LINE":
-        setLocalSectionIndex(cmd.sectionIndex);
-        setLocalLineIndex(cmd.lineIndex);
+      case "GOTO_LINE": {
+        const pos = applyGotoLine(cmd);
+        setLocalSectionIndex(pos.sectionIndex);
+        setLocalLineIndex(pos.lineIndex);
         break;
+      }
       case "NEXT_LINE": {
         const lines = script?.sections[localSectionIndex]?.content.split("\n") ?? [];
         if (localLineIndex < lines.length - 1) {
