@@ -44,6 +44,23 @@ export interface Script {
   bpm?: number;        // Beats per minute
   artist?: string;     // Artist / performer name
   hasChords?: boolean; // Whether sections use ChordPro notation
+  smpteCues?: SmpteCue[];
+}
+
+export type SmpteFps = 24 | 25 | 29.97 | 30;
+
+export interface SmpteCue {
+  id: string;
+  timecode: string; // HH:MM:SS:FF
+  sectionIndex: number;
+  lineIndex?: number;
+  label: string;
+}
+
+export interface SmpteSettings {
+  fps: SmpteFps;
+  fpsAuto: boolean;
+  dropFrame: boolean;
 }
 
 // ─── Setlist ─────────────────────────────────────────────────────────────────
@@ -82,14 +99,20 @@ export interface PerformSettings {
 export type ConsoleCommand =
   | { type: "GOTO_SCRIPT"; scriptId: string }
   | { type: "GOTO_SECTION"; index: number }
+  | { type: "GOTO_LINE"; sectionIndex: number; lineIndex: number }
   | { type: "NEXT_SECTION" }
   | { type: "PREV_SECTION" }
+  | { type: "NEXT_LINE" }
+  | { type: "PREV_LINE" }
   | { type: "NEXT_SCRIPT" }
   | { type: "PREV_SCRIPT" }
   | { type: "PLAY_PAUSE" }
   | { type: "UPDATE_SETTINGS"; settings: Partial<PerformSettings> }
   | { type: "TRANSPOSE"; steps: number }
-  | { type: "SET_TRANSPOSE"; steps: number };
+  | { type: "SET_TRANSPOSE"; steps: number }
+  | { type: "BLANKING"; on: boolean }
+  | { type: "STANDBY"; on: boolean }
+  | { type: "SMPTE_LOCK"; locked: boolean; timecode: string };
 
 // ─── App State ───────────────────────────────────────────────────────────────
 
@@ -99,6 +122,7 @@ export interface AppState {
   activeScriptId: string | null;
   activeSetlistId: string | null;
   performSettings: PerformSettings;
+  smpteSettings: SmpteSettings;
   // Perform runtime state
   isPerforming: boolean;
   currentSectionIndex: number;

@@ -37,6 +37,7 @@ import {
 import { useStore } from "@/lib/store";
 import { PlaybackMode, ColorScheme, Section } from "@/lib/types";
 import MusicSyncPanel from "@/components/MusicSyncPanel";
+import HotkeySheet from "@/components/HotkeySheet";
 
 // ─── Color schemes ────────────────────────────────────────────────────────────
 
@@ -462,6 +463,7 @@ export default function PerformPage({
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [showMusicSync, setShowMusicSync] = useState(false);
+  const [showHotkeys, setShowHotkeys] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
   const [showCueCard, setShowCueCard] = useState(false);
@@ -583,6 +585,43 @@ export default function PerformPage({
         case "Escape":
           if (document.fullscreenElement) document.exitFullscreen();
           else router.push(`/script/${id}`);
+          break;
+        case "?":
+          setShowHotkeys((v) => !v);
+          break;
+        case "m": case "M":
+          useStore.getState().updatePerformSettings({ isMirrored: !s.isMirrored });
+          break;
+        case "s": case "S":
+          useStore.getState().setMode("scroll");
+          break;
+        case "h": case "H":
+          useStore.getState().setMode("highlight");
+          break;
+        case "l": case "L":
+          useStore.getState().setMode("line");
+          break;
+        case "a": case "A":
+          if (!e.metaKey && !e.ctrlKey) useStore.getState().setMode("arrow");
+          break;
+        case "+": case "=":
+          useStore.getState().updatePerformSettings({ fontSize: Math.min(120, s.fontSize + 4) });
+          break;
+        case "-":
+          useStore.getState().updatePerformSettings({ fontSize: Math.max(16, s.fontSize - 4) });
+          break;
+        case "1": case "2": case "3": case "4": case "5":
+        case "6": case "7": case "8": case "9":
+          if (s.mode === "scroll") {
+            const speeds = [30, 45, 60, 80, 100, 130, 165, 210, 260];
+            useStore.getState().updatePerformSettings({ scrollSpeed: speeds[parseInt(e.key) - 1] });
+          }
+          break;
+        case "0":
+          if (s.mode === "scroll") { cancelAnimationFrame(animRef.current); lastTimeRef.current = 0; setIsScrolling(false); }
+          break;
+        case "b": case "B":
+          setShowMusicSync((v) => !v);
           break;
       }
     }
@@ -706,6 +745,13 @@ export default function PerformPage({
           ) : (
             <Maximize2 className="h-4 w-4" />
           )}
+        </button>
+        <button
+          onClick={() => setShowHotkeys(true)}
+          className="w-9 h-9 rounded-xl bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/60 transition-colors text-xs font-bold"
+          title="Keyboard shortcuts (?)"
+        >
+          ?
         </button>
         <button
           onClick={() => router.push(`/script/${id}`)}
@@ -858,6 +904,9 @@ export default function PerformPage({
           </p>
         </div>
       </div>
+
+      {/* Hotkey sheet */}
+      {showHotkeys && <HotkeySheet onClose={() => setShowHotkeys(false)} />}
 
       {/* Cue card overlay */}
       {showCueCard && currentSection?.cueCard && (

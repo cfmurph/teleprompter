@@ -10,6 +10,8 @@ import {
   PlaybackMode,
   CueCard,
   Setlist,
+  SmpteSettings,
+  SmpteCue,
 } from "./types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -163,13 +165,87 @@ const DEMO_SCRIPT_3: Script = {
   ],
 };
 
+function song(
+  id: string,
+  title: string,
+  artist: string,
+  key: string,
+  bpm: number,
+  sections: { id: string; type: SectionType; label: string; content: string }[]
+): Script {
+  return {
+    id,
+    title,
+    artist,
+    key,
+    bpm,
+    description: `${artist} — live chart`,
+    tags: ["live", "setlist"],
+    hasChords: false,
+    createdAt: now() - 50000,
+    updatedAt: now() - 40000,
+    wordCount: 0,
+    readingTimeSec: 0,
+    sections,
+  };
+}
+
+const DEMO_SCRIPT_4 = song("demo-4", "Slow Me Down", "Original", "G", 92, [
+  { id: "d4-s1", type: "verse", label: "Verse 1", content: "The night is moving faster than I am\nCity lights keep pulling at my hands\nIf I could hold this moment still\nI'd keep us right here on this hill" },
+  { id: "d4-s2", type: "chorus", label: "Chorus", content: "Slow me down, don't let me run\nThere's a whole life left when this song is done\nSlow me down, stay in the sound\nI'm not ready to come down" },
+]);
+
+const DEMO_SCRIPT_5 = song("demo-5", "Sick and Tired", "Original", "Em", 118, [
+  { id: "d5-s1", type: "verse", label: "Verse 1", content: "Same old room, same old ceiling fan\nTelling myself I still have a plan\nEvery clock is louder than the last\nI'm running out of easy alibis" },
+  { id: "d5-s2", type: "chorus", label: "Chorus", content: "I'm sick and tired of waiting around\nFor a better version of right now\nIf this is all we get tonight\nThen turn it up and let it ride" },
+]);
+
+const DEMO_SCRIPT_6 = song("demo-6", "Count On Me", "Original", "C", 89, [
+  { id: "d6-s1", type: "verse", label: "Verse 1", content: "I know some days the world won't cut you slack\nI've seen the load you carry on your back\nIt knocks you down and spins you all around\nand still you find your way somehow" },
+  { id: "d6-s2", type: "chorus", label: "Chorus", content: "You can count on me when the room goes quiet\nI'll be the light you don't have to find\nYou can count on me through the long remaining\nI won't leave you behind" },
+  { id: "d6-s3", type: "verse", label: "Verse 2", content: "You said the floor kept falling away\nEvery good thing felt a little fake\nIf the night is long I'll stay awake\nYou don't have to carry the weight" },
+  { id: "d6-s4", type: "chorus", label: "Chorus 2", content: "You can count on me when the night gets colder\nSomebody strong to lean on\nWell you can count on me\nTo hold you till the healing is done" },
+]);
+DEMO_SCRIPT_6.smpteCues = [
+  { id: "c6-1", timecode: "00:00:00:00", sectionIndex: 0, lineIndex: 0, label: "Verse 1" },
+  { id: "c6-2", timecode: "00:00:16:00", sectionIndex: 1, lineIndex: 0, label: "Chorus" },
+  { id: "c6-3", timecode: "00:00:32:00", sectionIndex: 2, lineIndex: 0, label: "Verse 2" },
+  { id: "c6-4", timecode: "00:00:48:00", sectionIndex: 3, lineIndex: 0, label: "Chorus 2" },
+];
+
+const DEMO_SCRIPT_7 = song("demo-7", "Somewhere", "Original", "D", 104, [
+  { id: "d7-s1", type: "verse", label: "Verse 1", content: "Maps on the dash and a half-full tank\nWe left the last town without a plan\nIf home is a feeling not a place\nThen maybe we're already there" },
+  { id: "d7-s2", type: "chorus", label: "Chorus", content: "Somewhere between the dark and the morning\nWe found a reason to stay\nSomewhere the radio keeps on playing\nAnd nothing gets in the way" },
+]);
+
+const DEMO_SCRIPT_8 = song("demo-8", "Seize the Day", "Original", "A", 126, [
+  { id: "d8-s1", type: "verse", label: "Verse 1", content: "Don't wait for perfect weather\nThe sky is never going to stay\nPut your hands on the wheel now\nAnd take the long way anyway" },
+  { id: "d8-s2", type: "chorus", label: "Chorus", content: "Seize the day before it fades\nEvery hour is a borrowed flame\nSing it loud, let it break\nThis is ours to take" },
+]);
+
+const DEMO_SETLIST: Setlist = {
+  id: "setlist-demo",
+  name: "Dallas — Default 2026",
+  date: "2026-09-30",
+  venue: "Default Timecode 1.2",
+  scriptIds: ["demo-4", "demo-5", "demo-6", "demo-7", "demo-8", "demo-1"],
+  createdAt: now() - 60000,
+  updatedAt: now() - 60000,
+};
+
 // Compute word counts for demo data
-[DEMO_SCRIPT_1, DEMO_SCRIPT_2, DEMO_SCRIPT_3].forEach((s) => {
+[DEMO_SCRIPT_1, DEMO_SCRIPT_2, DEMO_SCRIPT_3, DEMO_SCRIPT_4, DEMO_SCRIPT_5, DEMO_SCRIPT_6, DEMO_SCRIPT_7, DEMO_SCRIPT_8].forEach((s) => {
   s.wordCount = computeWordCount(s.sections);
   s.readingTimeSec = computeReadingTime(s.wordCount);
 });
 
 // ─── Default Settings ─────────────────────────────────────────────────────────
+
+const DEFAULT_SMPTE: SmpteSettings = {
+  fps: 30,
+  fpsAuto: true,
+  dropFrame: false,
+};
 
 const DEFAULT_SETTINGS: PerformSettings = {
   mode: "scroll",
@@ -192,6 +268,7 @@ interface StoreState {
   activeScriptId: string | null;
   activeSetlistId: string | null;
   performSettings: PerformSettings;
+  smpteSettings: SmpteSettings;
   isPerforming: boolean;
   currentSectionIndex: number;
   currentLineIndex: number;
@@ -231,12 +308,16 @@ interface StoreState {
   setCurrentLine: (index: number) => void;
   nextSection: () => void;
   prevSection: () => void;
+  nextLine: () => void;
+  prevLine: () => void;
 
   // Settings
   updatePerformSettings: (updates: Partial<PerformSettings>) => void;
   setMode: (mode: PlaybackMode) => void;
   setTranspose: (steps: number) => void;
   shiftTranspose: (delta: number) => void;
+  updateSmpteSettings: (updates: Partial<SmpteSettings>) => void;
+  setSmpteCues: (scriptId: string, cues: SmpteCue[]) => void;
 }
 
 function refreshDerived(script: Script): Script {
@@ -251,11 +332,19 @@ export const useStore = create<StoreState>()(
         "demo-1": DEMO_SCRIPT_1,
         "demo-2": DEMO_SCRIPT_2,
         "demo-3": DEMO_SCRIPT_3,
+        "demo-4": DEMO_SCRIPT_4,
+        "demo-5": DEMO_SCRIPT_5,
+        "demo-6": DEMO_SCRIPT_6,
+        "demo-7": DEMO_SCRIPT_7,
+        "demo-8": DEMO_SCRIPT_8,
       },
-      setlists: {},
-      activeScriptId: "demo-1",
-      activeSetlistId: null,
+      setlists: {
+        "setlist-demo": DEMO_SETLIST,
+      },
+      activeScriptId: "demo-6",
+      activeSetlistId: "setlist-demo",
       performSettings: DEFAULT_SETTINGS,
+      smpteSettings: DEFAULT_SMPTE,
       isPerforming: false,
       currentSectionIndex: 0,
       currentLineIndex: 0,
@@ -503,6 +592,34 @@ export const useStore = create<StoreState>()(
         }
       },
 
+      nextLine: () => {
+        const { activeScriptId, scripts, currentSectionIndex, currentLineIndex } = get();
+        if (!activeScriptId) return;
+        const script = scripts[activeScriptId];
+        if (!script) return;
+        const section = script.sections[currentSectionIndex];
+        if (!section) return;
+        const lines = section.content.split("\n");
+        if (currentLineIndex < lines.length - 1) {
+          set({ currentLineIndex: currentLineIndex + 1 });
+        } else if (currentSectionIndex < script.sections.length - 1) {
+          set({ currentSectionIndex: currentSectionIndex + 1, currentLineIndex: 0 });
+        }
+      },
+
+      prevLine: () => {
+        const { activeScriptId, scripts, currentSectionIndex, currentLineIndex } = get();
+        if (currentLineIndex > 0) {
+          set({ currentLineIndex: currentLineIndex - 1 });
+          return;
+        }
+        if (currentSectionIndex > 0) {
+          const prev = scripts[activeScriptId || ""]?.sections[currentSectionIndex - 1];
+          const last = prev ? Math.max(0, prev.content.split("\n").length - 1) : 0;
+          set({ currentSectionIndex: currentSectionIndex - 1, currentLineIndex: last });
+        }
+      },
+
       // ── Settings ──────────────────────────────────────────────────────────
 
       updatePerformSettings: (updates) =>
@@ -515,10 +632,30 @@ export const useStore = create<StoreState>()(
 
       shiftTranspose: (delta) =>
         set((s) => ({ transposeSteps: Math.max(-11, Math.min(11, s.transposeSteps + delta)) })),
+
+      updateSmpteSettings: (updates) =>
+        set((s) => ({ smpteSettings: { ...s.smpteSettings, ...updates } })),
+
+      setSmpteCues: (scriptId, cues) => {
+        const script = get().scripts[scriptId];
+        if (!script) return;
+        get().updateScript(scriptId, { smpteCues: cues });
+      },
     }),
     {
       name: "teleprompter-v1",
       storage: createJSONStorage(() => localStorage),
+      merge: (persisted, current) => {
+        const p = (persisted as Partial<StoreState> | undefined) ?? {};
+        const scripts = { ...current.scripts, ...(p.scripts ?? {}) };
+        const setlists = { ...current.setlists, ...(p.setlists ?? {}) };
+        if (!setlists["setlist-demo"]) setlists["setlist-demo"] = DEMO_SETLIST;
+        if (scripts["demo-6"] && !scripts["demo-6"].smpteCues?.length && DEMO_SCRIPT_6.smpteCues) {
+          scripts["demo-6"] = { ...scripts["demo-6"], smpteCues: DEMO_SCRIPT_6.smpteCues };
+        }
+        const smpteSettings = { ...current.smpteSettings, ...(p.smpteSettings ?? {}) };
+        return { ...current, ...p, scripts, setlists, smpteSettings };
+      },
     }
   )
 );

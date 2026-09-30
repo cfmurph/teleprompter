@@ -7,7 +7,6 @@ import {
   Mic,
   MicOff,
   Zap,
-  Clock,
   Plus,
   Trash2,
   X,
@@ -15,7 +14,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { TapTempo, bpmToScrollSpeed } from "@/lib/bpm-sync";
-import { LTCDecoder, LTCTimecode, SMPTECue, resolveActiveCue } from "@/lib/ltc-decoder";
+import { LTCDecoder, LTCTimecode, detectedToSmpteFps, resolveActiveCue } from "@/lib/ltc-decoder";
+import type { SmpteCue } from "@/lib/types";
 import { VoiceTracker, VoiceTrackState } from "@/lib/voice-track";
 import { useStore } from "@/lib/store";
 
@@ -183,26 +183,34 @@ function SmpteTab({
   scriptId: string;
   onSectionChange: (index: number) => void;
 }) {
-  const { scripts } = useStore();
+  const { scripts, smpteSettings, setSmpteCues, updateSmpteSettings } = useStore();
   const script = scripts[scriptId];
+  const cues = script?.smpteCues ?? [];
   const [listening, setListening] = useState(false);
   const [currentTc, setCurrentTc] = useState<LTCTimecode | null>(null);
-  const [cues, setCues] = useState<SMPTECue[]>([]);
   const [error, setError] = useState<string | null>(null);
   const decoderRef = useRef<LTCDecoder | null>(null);
-  const lastSectionRef = useRef<number>(-1);
+  const lastCueRef = useRef<string | null>(null);
 
   const handleFrame = useCallback(
     (tc: LTCTimecode) => {
       setCurrentTc(tc);
-      const active = resolveActiveCue(tc, cues);
-      if (active && active.sectionIndex !== lastSectionRef.current) {
-        lastSectionRef.current = active.sectionIndex;
+      const mapped = detectedToSmpteFps(tc.fps);
+      if (smpteSettings.fpsAuto && mapped !== smpteSettings.fps) {
+        updateSmpteSettings({ fps: mapped });
+      }
+      const fps = smpteSettings.fpsAuto ? mapped : smpteSettings.fps;
+      const active = resolveActiveCue(tc, cues, fps);
+      if (active && active.id !== lastCueRef.current) {
+        lastCueRef.current = active.id;
         onSectionChange(active.sectionIndex);
       }
     },
-    [cues, onSectionChange]
+    [cues, onSectionChange, smpteSettings.fps, smpteSettings.fpsAuto, updateSmpteSettings]
   );
+
+  const frameRef = useRef(handleFrame);
+  frameRef.current = handleFrame;
 
   async function toggleListen() {
     if (listening) {
@@ -214,22 +222,15 @@ function SmpteTab({
     }
 
     try {
-      const decoder = new LTCDecoder(handleFrame);
+      const decoder = new LTCDecoder((tc) => frameRef.current(tc));
       await decoder.start();
       decoderRef.current = decoder;
       setListening(true);
       setError(null);
-    } catch (e) {
+    } catch {
       setError("Could not access audio input. Check microphone permissions.");
     }
   }
-
-  // Update handler when cues change
-  useEffect(() => {
-    if (decoderRef.current) {
-      // Recreate with updated cues — re-init the handler
-    }
-  }, [cues, handleFrame]);
 
   useEffect(() => {
     return () => {
@@ -238,11 +239,9 @@ function SmpteTab({
   }, []);
 
   function addCue() {
-    const tc = currentTc
-      ? currentTc.raw
-      : "00:00:00:00";
-    setCues((prev) => [
-      ...prev,
+    const tc = currentTc ? currentTc.raw : "00:00:00:00";
+    setSmpteCues(scriptId, [
+      ...cues,
       {
         id: crypto.randomUUID(),
         timecode: tc,
@@ -252,14 +251,18 @@ function SmpteTab({
     ]);
   }
 
-  function updateCue(id: string, updates: Partial<SMPTECue>) {
-    setCues((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
+  function updateCue(id: string, updates: Partial<SmpteCue>) {
+    setSmpteCues(
+      scriptId,
+      cues.map((c) => (c.id === id ? { ...c, ...updates } : c))
     );
   }
 
   function deleteCue(id: string) {
-    setCues((prev) => prev.filter((c) => c.id !== id));
+    setSmpteCues(
+      scriptId,
+      cues.filter((c) => c.id !== id)
+    );
   }
 
   return (

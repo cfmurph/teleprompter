@@ -17,7 +17,11 @@ import {
   Bell,
   BellOff,
   X,
+  Download,
+  FileText,
+  FileType,
 } from "lucide-react";
+import { downloadTxt, downloadMarkdown, exportToPdf } from "@/lib/export";
 import { useStore } from "@/lib/store";
 import { Section, SectionType, CueCard } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -26,6 +30,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -362,6 +367,31 @@ export default function ScriptEditorPage({
               {formatReadingTime(script.readingTimeSec)}
             </span>
           </div>
+
+          {/* Export */}
+          <DropdownMenu>
+            <DropdownMenuTrigger className="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-transparent text-xs font-medium hover:bg-secondary transition-colors">
+              <Download className="h-3.5 w-3.5" /> Export
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => downloadTxt(script, false)}>
+                <FileText className="h-3.5 w-3.5 mr-2" /> Plain text (.txt)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => downloadTxt(script, true)}>
+                <FileText className="h-3.5 w-3.5 mr-2" /> Text with chords (.txt)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => downloadMarkdown(script, false)}>
+                <FileType className="h-3.5 w-3.5 mr-2" /> Markdown (.md)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => exportToPdf(script, false)}>
+                <FileText className="h-3.5 w-3.5 mr-2" /> Print / PDF (no chords)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportToPdf(script, true)}>
+                <FileText className="h-3.5 w-3.5 mr-2" /> Print / PDF (with chords)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Collab */}
           <Button

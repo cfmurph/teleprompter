@@ -324,7 +324,7 @@ export default function Dashboard() {
   const { scripts, createScript, setlists, createSetlist } = useStore();
   const [search, setSearch] = useState("");
   const [showImport, setShowImport] = useState(false);
-  const [tab, setTab] = useState<"scripts" | "setlists">("scripts");
+  const [tab, setTab] = useState<"scripts" | "setlists">("setlists");
 
   const scriptList = useMemo(() => {
     const all = Object.values(scripts).sort((a, b) => b.updatedAt - a.updatedAt);

@@ -1,5 +1,9 @@
 "use client";
 
+import type { SmpteCue, SmpteFps } from "./types";
+
+export type { SmpteCue, SmpteFps };
+
 /**
  * SMPTE LTC (Linear Timecode) decoder using Web Audio API.
  *
@@ -59,6 +63,13 @@ function nearestFps(fps: number): number {
   return KNOWN_FPS.reduce((best, f) =>
     Math.abs(f - fps) < Math.abs(best - fps) ? f : best
   );
+}
+
+export function detectedToSmpteFps(fps: number): SmpteFps {
+  if (fps === 24) return 24;
+  if (fps === 25) return 25;
+  if (fps === 29 || fps === 29.97) return 29.97;
+  return 30;
 }
 
 // ─── AudioWorklet processor code (runs in audio thread) ─────────────────────
@@ -270,21 +281,50 @@ export class LTCDecoder {
 
 // ─── SMPTE Cue ────────────────────────────────────────────────────────────────
 
-export interface SMPTECue {
-  id: string;
-  timecode: string; // "HH:MM:SS:FF"
-  sectionIndex: number;
-  label: string;
+export function nominalFps(fps: SmpteFps): number {
+  return fps === 29.97 ? 30 : fps;
+}
+
+export function parseTimecode(tc: string): { hours: number; minutes: number; seconds: number; frames: number } {
+  const parts = tc.trim().split(/[:;.]/).map((p) => parseInt(p, 10) || 0);
+  return {
+    hours: parts[0] ?? 0,
+    minutes: parts[1] ?? 0,
+    seconds: parts[2] ?? 0,
+    frames: parts[3] ?? 0,
+  };
+}
+
+export function formatSmpte(hours: number, minutes: number, seconds: number, frames: number, dropFrame = false): string {
+  const sep = dropFrame ? ";" : ":";
+  return [
+    String(hours).padStart(2, "0"),
+    String(minutes).padStart(2, "0"),
+    String(seconds).padStart(2, "0"),
+  ].join(":") + sep + String(frames).padStart(2, "0");
+}
+
+export function timecodeToFrames(tc: string, fps: SmpteFps): number {
+  const { hours, minutes, seconds, frames } = parseTimecode(tc);
+  return ((hours * 3600 + minutes * 60 + seconds) * nominalFps(fps) + frames);
+}
+
+export function framesToTimecode(total: number, fps: SmpteFps, dropFrame = false): string {
+  const rate = nominalFps(fps);
+  const frames = Math.max(0, Math.floor(total)) % rate;
+  const totalSec = Math.floor(Math.max(0, total) / rate);
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  return formatSmpte(hours, minutes, seconds, frames, dropFrame);
 }
 
 /**
  * Parse "HH:MM:SS:FF" into total seconds (ignoring frames).
  */
 export function timecodeToSeconds(tc: string): number {
-  const parts = tc.split(":").map(Number);
-  if (parts.length < 3) return 0;
-  const [h, m, s] = parts;
-  return h * 3600 + m * 60 + s;
+  const { hours, minutes, seconds } = parseTimecode(tc);
+  return hours * 3600 + minutes * 60 + seconds;
 }
 
 /**
@@ -292,18 +332,19 @@ export function timecodeToSeconds(tc: string): number {
  * Returns the last cue whose timecode is <= current timecode.
  */
 export function resolveActiveCue(
-  tc: LTCTimecode,
-  cues: SMPTECue[]
-): SMPTECue | null {
-  const currentSec = tc.hours * 3600 + tc.minutes * 60 + tc.seconds;
-  let active: SMPTECue | null = null;
-  for (const cue of cues) {
-    const cueSeconds = timecodeToSeconds(cue.timecode);
-    if (cueSeconds <= currentSec) {
-      active = cue;
-    } else {
-      break;
-    }
+  tc: { hours: number; minutes: number; seconds: number; frames: number; raw?: string },
+  cues: SmpteCue[],
+  fps: SmpteFps = 30
+): SmpteCue | null {
+  const current = timecodeToFrames(
+    tc.raw ?? formatSmpte(tc.hours, tc.minutes, tc.seconds, tc.frames),
+    fps
+  );
+  const sorted = [...cues].sort((a, b) => timecodeToFrames(a.timecode, fps) - timecodeToFrames(b.timecode, fps));
+  let active: SmpteCue | null = null;
+  for (const cue of sorted) {
+    if (timecodeToFrames(cue.timecode, fps) <= current) active = cue;
+    else break;
   }
   return active;
 }
