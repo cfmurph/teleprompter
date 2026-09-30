@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Script, Setlist } from "./types";
 import {
+  applyDurationInput,
+  capElapsed,
   clockFromElapsed,
   countLyricLines,
   durationFromBpm,
+  elapsedForLine,
   flattenLineIndex,
   formatDurationInput,
+  formatRemainingLabel,
+  lineAtElapsed,
   lineAtFlatIndex,
   msPerLyricLine,
   parseDurationInput,
+  remainingClockMs,
   resolveSongSync,
+  shouldBroadcastClock,
 } from "./song-sync";
 
 function makeScript(over: Partial<Script> = {}): Script {
@@ -147,6 +154,10 @@ describe("msPerLyricLine / durationFromBpm", () => {
     expect(msPerLyricLine(0, 4, 120, 2)).toBe(250);
   });
 
+  it("falls back to BPM when lineCount is 0 even if duration is set", () => {
+    expect(msPerLyricLine(60_000, 0, 120, 1)).toBe(500);
+  });
+
   it("clamps BPM and lines-per-beat in the BPM fallback", () => {
     expect(msPerLyricLine(0, 4, 1, 0)).toBe(60_000 / (20 * 0.25));
   });
@@ -249,3 +260,222 @@ describe("running clock lyric mapping", () => {
     expect(Math.floor(1_000 / perLine)).toBe(2);
   });
 });
+
+describe("lyric text edges", () => {
+  it("counts a trailing newline as an extra empty line", () => {
+    const script = makeScript({
+      sections: [{ id: "v", type: "verse", label: "V", content: "a\n" }],
+    });
+    expect(countLyricLines(script)).toBe(2);
+    expect(lineAtFlatIndex(script, 1)).toEqual({ sectionIndex: 0, lineIndex: 1 });
+  });
+
+  it("splits Windows newlines and keeps a carriage return on the first line", () => {
+    const script = makeScript({
+      sections: [{ id: "v", type: "verse", label: "V", content: "a\r\nb" }],
+    });
+    expect(countLyricLines(script)).toBe(2);
+    expect(lineAtFlatIndex(script, 0)).toEqual({ sectionIndex: 0, lineIndex: 0 });
+  });
+
+  it("returns a dummy first line when the script has no sections", () => {
+    const script = makeScript({ sections: [] });
+    expect(countLyricLines(script)).toBe(0);
+    expect(flattenLineIndex(script, 0, 0)).toBe(0);
+    expect(lineAtFlatIndex(script, 0)).toEqual({ sectionIndex: 0, lineIndex: 0 });
+    expect(lineAtElapsed(script, 1_000, 60_000, 120, 1)).toEqual({
+      sectionIndex: 0,
+      lineIndex: 0,
+      flat: 0,
+    });
+  });
+
+  it("does not clamp flattenLineIndex past the last section", () => {
+    expect(flattenLineIndex(makeScript(), 99, 0)).toBe(3);
+  });
+});
+
+describe("resolveSongSync zero vs unset", () => {
+  it("accepts an undefined setlist and uses the script", () => {
+    expect(resolveSongSync(undefined, makeScript())).toEqual({
+      bpm: 90,
+      durationMs: 204_000,
+      smpteStart: "00:00:00:00",
+    });
+  });
+
+  it("treats durationMs 0 as a real override, not unset", () => {
+    const setlist = makeSetlist({ songSync: { s1: { durationMs: 0 } } });
+    const sync = resolveSongSync(setlist, makeScript());
+    expect(sync.durationMs).toBe(0);
+    expect(msPerLyricLine(sync.durationMs, 3, 90, 1)).toBe(60_000 / 90);
+  });
+
+  it("treats bpm 0 as a real override; clampBpm is the UI floor", () => {
+    const setlist = makeSetlist({ songSync: { s1: { bpm: 0 } } });
+    expect(resolveSongSync(setlist, makeScript()).bpm).toBe(0);
+  });
+
+  it("keeps an empty SMPTE start string instead of the default", () => {
+    const setlist = makeSetlist({ songSync: { s1: { smpteStart: "" } } });
+    expect(resolveSongSync(setlist, makeScript()).smpteStart).toBe("");
+    expect(clockFromElapsed(0, "", 30, false)).toBe("00:00:00:00");
+  });
+});
+
+describe("parseDurationInput boundaries", () => {
+  it("treats 0, 0:00, and zero SMPTE as explicit zero", () => {
+    expect(parseDurationInput("0")).toBe(0);
+    expect(parseDurationInput("0:00")).toBe(0);
+    expect(parseDurationInput("00:00:00:00")).toBe(0);
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(parseDurationInput("  3:24  ")).toBe(204_000);
+  });
+
+  it("treats a bare integer as seconds, not M:SS", () => {
+    expect(parseDurationInput("90")).toBe(90_000);
+    expect(parseDurationInput("1:30")).toBe(90_000);
+  });
+
+  it("rejects one-digit seconds and non-time strings", () => {
+    expect(parseDurationInput("1:0")).toBeNull();
+    expect(parseDurationInput("3:2")).toBeNull();
+    expect(parseDurationInput("3.24")).toBeNull();
+    expect(parseDurationInput("1e3")).toBeNull();
+    expect(parseDurationInput("-1")).toBeNull();
+    expect(parseDurationInput("NaN")).toBeNull();
+  });
+
+  it("distinguishes H:MM:SS from SMPTE", () => {
+    expect(parseDurationInput("1:02:03")).toBe(3_723_000);
+    expect(parseDurationInput("00:01:02:03")).toBe(62_000 + Math.round((3 / 30) * 1000));
+  });
+
+  it("accepts 10-hour H:MM:SS but requires two-digit hours for SMPTE", () => {
+    expect(parseDurationInput("10:00:00")).toBe(36_000_000);
+    expect(parseDurationInput("10:00:00:00")).toBe(36_000_000);
+  });
+
+  it("currently accepts illegal minute/second fields", () => {
+    expect(parseDurationInput("3:99")).toBe((3 * 60 + 99) * 1000);
+    expect(parseDurationInput("1:60")).toBe(120_000);
+    expect(formatDurationInput(parseDurationInput("3:99")!)).toBe("4:39");
+  });
+
+  it("converts SMPTE frames at 30 fps regardless of show fps", () => {
+    expect(parseDurationInput("00:00:00:15")).toBe(500);
+    expect(parseDurationInput("00:00:00:12")).toBe(400);
+  });
+});
+
+describe("formatDurationInput rounding", () => {
+  it("rounds half a second up and sub-500ms down", () => {
+    expect(formatDurationInput(499)).toBe("0:00");
+    expect(formatDurationInput(500)).toBe("0:01");
+  });
+
+  it("does not round-trip frame-accurate SMPTE durations", () => {
+    const ms = parseDurationInput("00:00:00:15")!;
+    expect(formatDurationInput(ms)).toBe("0:01");
+  });
+
+  it("clamps negative milliseconds", () => {
+    expect(formatDurationInput(-8_000)).toBe("0:00");
+  });
+});
+
+describe("applyDurationInput", () => {
+  it("keeps the previous length on empty or invalid input", () => {
+    expect(applyDurationInput("", 204_000)).toBe(204_000);
+    expect(applyDurationInput("nope", 204_000)).toBe(204_000);
+    expect(applyDurationInput("1:00", 204_000)).toBe(60_000);
+  });
+});
+
+describe("clockFromElapsed fps and frames", () => {
+  it("advances one second at 24, 25, and 29.97 nominal rates", () => {
+    expect(clockFromElapsed(1_000, "00:00:00:00", 24, false)).toBe("00:00:01:00");
+    expect(clockFromElapsed(1_000, "00:00:00:00", 25, false)).toBe("00:00:01:00");
+    expect(clockFromElapsed(1_000, "00:00:00:00", 29.97, false)).toBe("00:00:01:00");
+  });
+
+  it("stays on the same frame until a full frame of elapsed time", () => {
+    expect(clockFromElapsed(16, "00:00:00:00", 30, false)).toBe("00:00:00:00");
+    expect(clockFromElapsed(34, "00:00:00:00", 30, false)).toBe("00:00:00:01");
+  });
+
+  it("adds elapsed frames onto a start TC that already has frames", () => {
+    expect(clockFromElapsed(1_000 / 30, "01:00:00:29", 30, false)).toBe("01:00:01:00");
+  });
+
+  it("does not apply true drop-frame skipped-frame math", () => {
+    expect(clockFromElapsed(60_000, "00:00:00:00", 29.97, true)).toBe("00:01:00;00");
+  });
+
+  it("can emit hours beyond two digits", () => {
+    expect(clockFromElapsed(100 * 3_600_000, "00:00:00:00", 30, false)).toBe("100:00:00:00");
+  });
+});
+
+describe("capElapsed / remainingClockMs / formatRemainingLabel", () => {
+  it("caps at duration only when duration is set", () => {
+    expect(capElapsed(90_000, 60_000)).toBe(60_000);
+    expect(capElapsed(90_000, 0)).toBe(90_000);
+    expect(capElapsed(-20, 60_000)).toBe(0);
+  });
+
+  it("freezes remaining at zero after the song ends", () => {
+    expect(remainingClockMs(60_000, 59_000)).toBe(1_000);
+    expect(remainingClockMs(60_000, 60_000)).toBe(0);
+    expect(remainingClockMs(60_000, 90_000)).toBe(0);
+    expect(remainingClockMs(0, 5_000)).toBe(0);
+  });
+
+  it("formats operator remaining as a negative duration", () => {
+    expect(formatRemainingLabel(60_000, 20_000)).toBe("-0:40");
+    expect(formatRemainingLabel(0, 1_000)).toBe("");
+  });
+});
+
+describe("lineAtElapsed / elapsedForLine", () => {
+  const script = makeScript();
+
+  it("holds the last line at and past song end", () => {
+    expect(lineAtElapsed(script, 59_999, 60_000, 89, 1).flat).toBe(2);
+    expect(lineAtElapsed(script, 60_000, 60_000, 89, 1)).toEqual({
+      sectionIndex: 1,
+      lineIndex: 0,
+      flat: 2,
+    });
+    expect(lineAtElapsed(script, 90_000, 60_000, 89, 1).flat).toBe(2);
+  });
+
+  it("crosses a line on the per-line boundary, not one ms before", () => {
+    expect(lineAtElapsed(script, 19_999, 60_000, 89, 1).flat).toBe(0);
+    expect(lineAtElapsed(script, 20_000, 60_000, 89, 1).flat).toBe(1);
+  });
+
+  it("maps a single-section song", () => {
+    const one = makeScript({
+      sections: [{ id: "v", type: "verse", label: "V", content: "a\nb\nc" }],
+    });
+    expect(lineAtElapsed(one, 0, 30_000, 120, 1).flat).toBe(0);
+    expect(lineAtElapsed(one, 10_000, 30_000, 120, 1).flat).toBe(1);
+    expect(lineAtElapsed(one, 20_000, 30_000, 120, 1).flat).toBe(2);
+  });
+
+  it("seeks jumpTo elapsed to the start of a line, not song end", () => {
+    const last = elapsedForLine(script, 1, 0, 60_000, 89, 1);
+    expect(last).toBe(40_000);
+    expect(last).toBeLessThan(60_000);
+    expect(lineAtElapsed(script, last, 60_000, 89, 1).flat).toBe(2);
+  });
+
+  it("broadcasts only when the displayed clock string changes", () => {
+    expect(shouldBroadcastClock("00:00:00:00", "00:00:00:00")).toBe(false);
+    expect(shouldBroadcastClock("00:00:00:00", "00:00:00:01")).toBe(true);
+  });
+});
+

@@ -14,6 +14,7 @@ import {
   SmpteCue,
   SongSync,
 } from "./types";
+import { mergePersistedState } from "./persist-merge";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -667,25 +668,11 @@ export const useStore = create<StoreState>()(
       name: "teleprompter-v1",
       skipHydration: true,
       storage: createJSONStorage(() => localStorage),
-      merge: (persisted, current) => {
-        const p = (persisted as Partial<StoreState> | undefined) ?? {};
-        const scripts = { ...current.scripts, ...(p.scripts ?? {}) };
-        const setlists = { ...current.setlists, ...(p.setlists ?? {}) };
-        if (!setlists["setlist-demo"]) setlists["setlist-demo"] = DEMO_SETLIST;
-        if (scripts["demo-6"] && !scripts["demo-6"].smpteCues?.length && DEMO_SCRIPT_6.smpteCues) {
-          scripts["demo-6"] = { ...scripts["demo-6"], smpteCues: DEMO_SCRIPT_6.smpteCues };
-        }
-        for (const demo of [DEMO_SCRIPT_4, DEMO_SCRIPT_5, DEMO_SCRIPT_6, DEMO_SCRIPT_7, DEMO_SCRIPT_8]) {
-          if (scripts[demo.id] && !scripts[demo.id].durationMs && demo.durationMs) {
-            scripts[demo.id] = { ...scripts[demo.id], durationMs: demo.durationMs };
-          }
-        }
-        if (setlists["setlist-demo"] && !setlists["setlist-demo"].songSync) {
-          setlists["setlist-demo"] = { ...setlists["setlist-demo"], songSync: DEMO_SETLIST.songSync };
-        }
-        const smpteSettings = { ...current.smpteSettings, ...(p.smpteSettings ?? {}) };
-        return { ...current, ...p, scripts, setlists, smpteSettings };
-      },
+      merge: (persisted, current) =>
+        mergePersistedState(persisted as Partial<StoreState> | undefined, current, {
+          demoScripts: [DEMO_SCRIPT_4, DEMO_SCRIPT_5, DEMO_SCRIPT_6, DEMO_SCRIPT_7, DEMO_SCRIPT_8],
+          demoSetlist: DEMO_SETLIST,
+        }),
     }
   )
 );

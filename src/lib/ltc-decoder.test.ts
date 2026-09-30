@@ -68,4 +68,46 @@ describe("resolveActiveCue", () => {
     expect(resolveActiveCue({ hours: 0, minutes: 0, seconds: 2, frames: 0 }, cues, 30)?.id).toBe("early");
     expect(resolveActiveCue({ hours: 0, minutes: 0, seconds: 10, frames: 1 }, cues, 30)?.id).toBe("late");
   });
+
+  it("returns null for an empty cue list", () => {
+    expect(resolveActiveCue({ hours: 0, minutes: 0, seconds: 5, frames: 0 }, [], 30)).toBeNull();
+  });
+
+  it("activates a cue at 00:00:00:00", () => {
+    const zero = [{ id: "open", timecode: "00:00:00:00", sectionIndex: 0, label: "top" }];
+    expect(resolveActiveCue({ hours: 0, minutes: 0, seconds: 0, frames: 0 }, zero, 30)?.id).toBe("open");
+  });
+
+  it("stays inactive one frame before the first cue", () => {
+    expect(resolveActiveCue({ hours: 0, minutes: 0, seconds: 1, frames: 29 }, cues, 30)).toBeNull();
+  });
+
+  it("uses the later of two cues that share a timecode", () => {
+    const dup = [
+      { id: "a", timecode: "00:00:05:00", sectionIndex: 0, label: "a" },
+      { id: "b", timecode: "00:00:05:00", sectionIndex: 1, label: "b" },
+    ];
+    expect(resolveActiveCue({ hours: 0, minutes: 0, seconds: 5, frames: 0 }, dup, 30)?.id).toBe("b");
+  });
 });
+
+describe("timecode edges", () => {
+  it("parses missing fields as zero", () => {
+    expect(parseTimecode("")).toEqual({ hours: 0, minutes: 0, seconds: 0, frames: 0 });
+    expect(parseTimecode("01:02")).toEqual({ hours: 1, minutes: 2, seconds: 0, frames: 0 });
+  });
+
+  it("converts one second of frames at 24 and 25 fps", () => {
+    expect(framesToTimecode(24, 24, false)).toBe("00:00:01:00");
+    expect(framesToTimecode(25, 25, false)).toBe("00:00:01:00");
+  });
+
+  it("clamps negative frame totals to zero", () => {
+    expect(framesToTimecode(-90, 30, false)).toBe("00:00:00:00");
+  });
+
+  it("maps 25 fps detections", () => {
+    expect(detectedToSmpteFps(25)).toBe(25);
+  });
+});
+

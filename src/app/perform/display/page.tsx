@@ -10,7 +10,7 @@ import { Suspense, useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { useBroadcastReceiver } from "@/lib/broadcast";
-import { ConsoleCommand, ColorScheme } from "@/lib/types";
+import { applySmpteLock } from "@/lib/console-commands";
 import { parseContent } from "@/lib/chord-utils";
 
 // ─── Color schemes ────────────────────────────────────────────────────────────
@@ -363,7 +363,7 @@ function DisplayInner() {
         setStandBy(cmd.on);
         break;
       case "SMPTE_LOCK":
-        setSmpteLock({ locked: cmd.locked, timecode: cmd.timecode });
+        setSmpteLock(applySmpteLock(cmd));
         break;
     }
   }, [script, setlist, scriptId, updatePerformSettings, localSectionIndex, localLineIndex]);

@@ -18,18 +18,22 @@ import { useStore } from "@/lib/store";
 import { ConsoleCommand, FontFamily, Script, SmpteFps } from "@/lib/types";
 import { useBroadcastSender } from "@/lib/broadcast";
 import { stripChords } from "@/lib/chord-utils";
-import { TapTempo, bpmToScrollSpeed } from "@/lib/bpm-sync";
+import { TapTempo, bpmToScrollSpeed, clampBpm } from "@/lib/bpm-sync";
+import { DurationField } from "@/components/DurationField";
 import {
+  capElapsed,
   clockFromElapsed,
   countLyricLines,
   durationFromBpm,
-  flattenLineIndex,
+  elapsedForLine,
   formatDurationInput,
-  lineAtFlatIndex,
-  msPerLyricLine,
+  formatRemainingLabel,
+  lineAtElapsed,
   parseDurationInput,
   resolveSongSync,
+  shouldBroadcastClock,
 } from "@/lib/song-sync";
+import { smpteLockCommand } from "@/lib/console-commands";
 import {
   LTCDecoder,
   LTCTimecode,
@@ -52,46 +56,6 @@ const FPS_CHIPS: { label: string; fpsAuto: boolean; fps?: SmpteFps }[] = [
 const LINES_PER_BEAT = [0.5, 1, 1.5, 2] as const;
 
 type SyncMode = "bpm" | "smpte";
-
-function DurationField({
-  valueMs,
-  onCommit,
-  placeholder = "3:24",
-  className,
-}: {
-  valueMs: number;
-  onCommit: (raw: string) => void;
-  placeholder?: string;
-  className?: string;
-}) {
-  const formatted = valueMs > 0 ? formatDurationInput(valueMs) : "";
-  const [draft, setDraft] = useState(formatted);
-  const [focused, setFocused] = useState(false);
-
-  useEffect(() => {
-    if (!focused) setDraft(formatted);
-  }, [formatted, focused]);
-
-  return (
-    <input
-      value={focused ? draft : formatted}
-      placeholder={placeholder}
-      onFocus={() => {
-        setFocused(true);
-        setDraft(formatted);
-      }}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        setFocused(false);
-        onCommit(draft);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-      className={className}
-    />
-  );
-}
 
 // ─── Script line flattening ───────────────────────────────────────────────────
 
@@ -986,14 +950,12 @@ export default function ConsolePage({
   const cues = activeScript?.smpteCues ?? [];
   const fps = smpteSettings.fps;
   const songSync = resolveSongSync(setlist, activeScript);
-  const bpm = Math.max(20, Math.min(300, songSync.bpm));
+  const bpm = clampBpm(songSync.bpm);
   const durationMs = songSync.durationMs;
-  const lineCount = activeScript ? countLyricLines(activeScript) : 0;
   const displayTc = ltcTc
     ? formatSmpte(ltcTc.hours, ltcTc.minutes, ltcTc.seconds, ltcTc.frames, smpteSettings.dropFrame || ltcTc.dropFrame)
     : clockFromElapsed(elapsedMs, songSync.smpteStart, fps, smpteSettings.dropFrame);
-  const remainingMs = durationMs > 0 ? Math.max(0, durationMs - elapsedMs) : 0;
-  const remainingLabel = durationMs > 0 ? `-${formatDurationInput(remainingMs)}` : "";
+  const remainingLabel = formatRemainingLabel(durationMs, elapsedMs);
 
   useEffect(() => {
     if (!activeScriptId && setlist?.scriptIds.length) {
@@ -1085,7 +1047,7 @@ export default function ConsolePage({
           lineIndex: active.lineIndex ?? 0,
         });
       }
-      send({ type: "SMPTE_LOCK", locked: true, timecode: tc.raw });
+      send(smpteLockCommand(tc.raw, true));
     },
     [cues, dispatch, send, smpteSettings.dropFrame, smpteSettings.fps, smpteSettings.fpsAuto, updateSmpteSettings]
   );
@@ -1107,19 +1069,16 @@ export default function ConsolePage({
     if (!isPlaying || syncOn) return;
     const script = activeScript;
     const origin = performance.now() - elapsedRef.current;
-    const perLine = msPerLyricLine(durationMs, lineCount, bpm, linesPerBeat);
     const startTc = songSync.smpteStart;
     const drop = smpteSettings.dropFrame;
     let raf = 0;
     const tick = (now: number) => {
-      const raw = now - origin;
-      const capped = durationMs > 0 ? Math.min(raw, durationMs) : raw;
+      const capped = capElapsed(now - origin, durationMs);
       setElapsedMs(capped);
-      if (script && lineCount > 0 && perLine > 0) {
-        const flat = Math.min(lineCount - 1, Math.floor(capped / perLine));
-        if (flat !== lastFlatRef.current) {
-          lastFlatRef.current = flat;
-          const pos = lineAtFlatIndex(script, flat);
+      if (script) {
+        const pos = lineAtElapsed(script, capped, durationMs, bpm, linesPerBeat);
+        if (pos.flat !== lastFlatRef.current) {
+          lastFlatRef.current = pos.flat;
           dispatchRef.current({
             type: "GOTO_LINE",
             sectionIndex: pos.sectionIndex,
@@ -1128,9 +1087,9 @@ export default function ConsolePage({
         }
       }
       const tc = clockFromElapsed(capped, startTc, fps, drop);
-      if (tc !== lastClockSentRef.current) {
+      if (shouldBroadcastClock(lastClockSentRef.current, tc)) {
         lastClockSentRef.current = tc;
-        sendRef.current({ type: "SMPTE_LOCK", locked: true, timecode: tc });
+        sendRef.current(smpteLockCommand(tc, true));
       }
       raf = requestAnimationFrame(tick);
     };
@@ -1140,7 +1099,6 @@ export default function ConsolePage({
     isPlaying,
     syncOn,
     durationMs,
-    lineCount,
     bpm,
     linesPerBeat,
     activeScript,
@@ -1163,7 +1121,7 @@ export default function ConsolePage({
       setSyncOn(false);
       setLtcTc(null);
       setSyncError(null);
-      send({ type: "SMPTE_LOCK", locked: false, timecode: displayTc });
+      send(smpteLockCommand(displayTc, false));
       return;
     }
     try {
@@ -1209,7 +1167,7 @@ export default function ConsolePage({
   }
 
   function applyBpm(next: number) {
-    const value = Math.max(20, Math.min(300, Math.round(next)));
+    const value = clampBpm(next);
     if (activeScript) {
       updateSongSync(setlistId, activeScript.id, { bpm: value });
       updateScript(activeScript.id, { bpm: value });
@@ -1227,20 +1185,19 @@ export default function ConsolePage({
   }
 
   function applyDuration(raw: string) {
-    const ms = parseDurationInput(raw);
-    if (ms == null || !activeScript) return;
-    updateSongSync(setlistId, activeScript.id, { durationMs: ms });
-    updateScript(activeScript.id, { durationMs: ms });
+    if (!activeScript) return;
+    const parsed = parseDurationInput(raw);
+    if (parsed == null) return;
+    updateSongSync(setlistId, activeScript.id, { durationMs: parsed });
+    updateScript(activeScript.id, { durationMs: parsed });
   }
 
   function jumpTo(si: number, li: number) {
     dispatch({ type: "GOTO_LINE", sectionIndex: si, lineIndex: li });
     if (!activeScript) return;
-    const count = countLyricLines(activeScript);
-    const flat = flattenLineIndex(activeScript, si, li);
-    const perLine = msPerLyricLine(durationMs, count, bpm, linesPerBeat);
-    lastFlatRef.current = flat;
-    setElapsedMs(flat * perLine);
+    const elapsed = elapsedForLine(activeScript, si, li, durationMs, bpm, linesPerBeat);
+    lastFlatRef.current = lineAtElapsed(activeScript, elapsed, durationMs, bpm, linesPerBeat).flat;
+    setElapsedMs(elapsed);
   }
 
   function applyLinesPerBeat(next: number) {

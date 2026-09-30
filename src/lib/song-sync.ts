@@ -98,3 +98,59 @@ export function clockFromElapsed(
   const extra = Math.floor((Math.max(0, elapsedMs) / 1000) * nominalFps(fps));
   return framesToTimecode(start + extra, fps, dropFrame);
 }
+
+/** Clamp elapsed to [0, duration] when the song has a length; otherwise only floor at 0. */
+export function capElapsed(elapsedMs: number, durationMs: number): number {
+  const raw = Math.max(0, elapsedMs);
+  return durationMs > 0 ? Math.min(raw, durationMs) : raw;
+}
+
+export function remainingClockMs(durationMs: number, elapsedMs: number): number {
+  return durationMs > 0 ? Math.max(0, durationMs - elapsedMs) : 0;
+}
+
+export function formatRemainingLabel(durationMs: number, elapsedMs: number): string {
+  if (durationMs <= 0) return "";
+  return `-${formatDurationInput(remainingClockMs(durationMs, elapsedMs))}`;
+}
+
+/** Keep the previous length when the Time field is empty or malformed. */
+export function applyDurationInput(raw: string, currentMs: number): number {
+  const parsed = parseDurationInput(raw);
+  return parsed == null ? currentMs : parsed;
+}
+
+export function lineAtElapsed(
+  script: Script,
+  elapsedMs: number,
+  durationMs: number,
+  bpm: number,
+  linesPerBeat: number
+): { sectionIndex: number; lineIndex: number; flat: number } {
+  const lineCount = countLyricLines(script);
+  const capped = capElapsed(elapsedMs, durationMs);
+  const perLine = msPerLyricLine(durationMs, lineCount, bpm, linesPerBeat);
+  if (lineCount <= 0 || !(perLine > 0)) {
+    return { sectionIndex: 0, lineIndex: 0, flat: 0 };
+  }
+  const flat = Math.min(lineCount - 1, Math.floor(capped / perLine));
+  const pos = lineAtFlatIndex(script, flat);
+  return { ...pos, flat };
+}
+
+export function elapsedForLine(
+  script: Script,
+  sectionIndex: number,
+  lineIndex: number,
+  durationMs: number,
+  bpm: number,
+  linesPerBeat: number
+): number {
+  const count = countLyricLines(script);
+  const flat = flattenLineIndex(script, sectionIndex, lineIndex);
+  return flat * msPerLyricLine(durationMs, count, bpm, linesPerBeat);
+}
+
+export function shouldBroadcastClock(previous: string, next: string): boolean {
+  return previous !== next;
+}

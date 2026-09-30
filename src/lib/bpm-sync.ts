@@ -20,9 +20,12 @@ export interface BpmSyncConfig {
   linesPerBeat: number;  // How many lines advance per beat (default 1)
 }
 
-/**
- * Calculate scroll speed in px/sec for a given BPM config.
- */
+export function clampBpm(n: number): number {
+  if (!Number.isFinite(n)) return 120;
+  return Math.max(20, Math.min(300, Math.round(n)));
+}
+
+/** Calculate scroll speed in px/sec for a given BPM config. */
 export function bpmToScrollSpeed(config: BpmSyncConfig): number {
   const { bpm, fontSize, lineSpacing, linesPerBeat } = config;
   const lineHeight = fontSize * lineSpacing;

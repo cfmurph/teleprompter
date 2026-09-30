@@ -87,4 +87,74 @@ describe("updateSongSync", () => {
     useStore.getState().updateSongSync("missing", "demo-6", { bpm: 40 });
     expect(useStore.getState().setlists).toBe(before.setlists);
   });
+
+  it("creates songSync on a setlist that has none", () => {
+    useStore.setState((s) => ({
+      setlists: {
+        ...s.setlists,
+        "setlist-demo": { ...s.setlists["setlist-demo"], songSync: undefined },
+      },
+    }));
+    useStore.getState().updateSongSync("setlist-demo", "demo-6", { bpm: 100, durationMs: 60_000 });
+    expect(useStore.getState().setlists["setlist-demo"].songSync).toEqual({
+      "demo-6": { bpm: 100, durationMs: 60_000 },
+    });
+  });
+
+  it("can store an explicit zero duration override", () => {
+    useStore.getState().updateSongSync("setlist-demo", "demo-6", { durationMs: 0 });
+    const setlist = useStore.getState().setlists["setlist-demo"];
+    const script = useStore.getState().scripts["demo-6"];
+    expect(resolveSongSync(setlist, script).durationMs).toBe(0);
+  });
 });
+
+describe("applyDuration pair", () => {
+  it("writes the setlist override and the library chart together", () => {
+    useStore.setState({
+      setlists: {
+        "setlist-demo": {
+          id: "setlist-demo",
+          name: "Dallas",
+          date: "2026-09-30",
+          venue: "",
+          scriptIds: ["demo-6"],
+          songSync: {},
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      },
+      scripts: {
+        "demo-6": {
+          id: "demo-6",
+          title: "Count On Me",
+          description: "",
+          tags: [],
+          sections: [{ id: "v", type: "verse", label: "V1", content: "a\nb" }],
+          createdAt: 0,
+          updatedAt: 0,
+          wordCount: 2,
+          readingTimeSec: 1,
+          bpm: 90,
+          durationMs: 204_000,
+        },
+      },
+    });
+    const parsed = 60_000;
+    useStore.getState().updateSongSync("setlist-demo", "demo-6", { durationMs: parsed });
+    useStore.getState().updateScript("demo-6", { durationMs: parsed });
+    expect(useStore.getState().scripts["demo-6"].durationMs).toBe(60_000);
+    expect(useStore.getState().setlists["setlist-demo"].songSync?.["demo-6"]?.durationMs).toBe(60_000);
+  });
+
+  it("leaves both values unchanged when duration input is invalid", () => {
+    const before = useStore.getState();
+    const parsed = null;
+    if (parsed != null) {
+      before.updateSongSync("setlist-demo", "demo-6", { durationMs: parsed });
+    }
+    expect(useStore.getState().scripts["demo-6"].durationMs).toBe(before.scripts["demo-6"].durationMs);
+    expect(useStore.getState().setlists["setlist-demo"].songSync).toEqual(before.setlists["setlist-demo"].songSync);
+  });
+});
+
