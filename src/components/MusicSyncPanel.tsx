@@ -202,13 +202,13 @@ function SmpteTab({
         updateSmpteSettings({ fps: mapped });
       }
       const fps = smpteSettings.fpsAuto ? mapped : smpteSettings.fps;
-      const active = resolveActiveCue(tc, cues, fps);
+      const active = resolveActiveCue(tc, cues, fps, tc.dropFrame || smpteSettings.dropFrame);
       if (active && active.id !== lastCueRef.current) {
         lastCueRef.current = active.id;
         onSectionChange(active.sectionIndex);
       }
     },
-    [cues, onSectionChange, smpteSettings.fps, smpteSettings.fpsAuto, updateSmpteSettings]
+    [cues, onSectionChange, smpteSettings.dropFrame, smpteSettings.fps, smpteSettings.fpsAuto, updateSmpteSettings]
   );
 
   const frameRef = useRef(handleFrame);

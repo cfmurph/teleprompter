@@ -2,7 +2,7 @@
 
 import { Plus, Trash2 } from "lucide-react";
 import { Script, SmpteCue, SmpteFps } from "@/lib/types";
-import { timecodeToFrames } from "@/lib/ltc-decoder";
+import { supportsDropFrame, timecodeToFrames } from "@/lib/ltc-decoder";
 
 export function SmpteTimeline({
   script,
@@ -30,7 +30,7 @@ export function SmpteTimeline({
   onDropFrame: (on: boolean) => void;
 }) {
   const sorted = [...cues].sort(
-    (a, b) => timecodeToFrames(a.timecode, fps) - timecodeToFrames(b.timecode, fps)
+    (a, b) => timecodeToFrames(a.timecode, fps, dropFrame) - timecodeToFrames(b.timecode, fps, dropFrame)
   );
 
   return (
@@ -47,11 +47,12 @@ export function SmpteTimeline({
         <button
           type="button"
           onClick={() => onDropFrame(!dropFrame)}
+          disabled={!supportsDropFrame(fps)}
           className={`h-5 px-1.5 text-[10px] rounded-sm border ${
-            dropFrame
+            dropFrame && supportsDropFrame(fps)
               ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
               : "bg-[#5c5c5c] border-[#6e6e6e] text-zinc-300"
-          }`}
+          } disabled:opacity-40`}
         >
           DF
         </button>

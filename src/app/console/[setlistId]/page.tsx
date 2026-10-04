@@ -40,20 +40,19 @@ import { gotoLineCommand, gotoScriptCommand, smpteLockCommand } from "@/lib/cons
 import {
   LTCDecoder,
   LTCTimecode,
+  SMPTE_RATES,
   detectedToSmpteFps,
   formatSmpte,
-  nominalFps,
   resolveActiveCue,
+  supportsDropFrame,
   timecodeToFrames,
+  trueFps,
 } from "@/lib/ltc-decoder";
 import { SmpteTimeline } from "@/components/SmpteTimeline";
 
 const FPS_CHIPS: { label: string; fpsAuto: boolean; fps?: SmpteFps }[] = [
   { label: "Auto", fpsAuto: true },
-  { label: "24", fpsAuto: false, fps: 24 },
-  { label: "25", fpsAuto: false, fps: 25 },
-  { label: "29.97", fpsAuto: false, fps: 29.97 },
-  { label: "30", fpsAuto: false, fps: 30 },
+  ...SMPTE_RATES.map((fps) => ({ label: String(fps), fpsAuto: false, fps })),
 ];
 
 const LINES_PER_BEAT = [0.5, 1, 1.5, 2] as const;
@@ -563,7 +562,7 @@ function TransportDeck({
               Sync
             </BevelBtn>
             <div className="flex-1 bg-[#2a2a2a] border border-black/50 rounded-sm h-11 flex items-center gap-2 px-2 min-w-0">
-              <div className="flex items-center gap-0.5 shrink-0">
+              <div className="flex items-center gap-0.5 shrink-0 flex-wrap">
                 <span className="text-[10px] text-zinc-500 mr-0.5">FPS</span>
                 {FPS_CHIPS.map((chip) => {
                   const active = chip.fpsAuto ? fpsAuto : !fpsAuto && chip.fps === fps;
@@ -1038,8 +1037,9 @@ export default function ConsolePage({
         updateSmpteSettings({ fps: mapped, dropFrame: tc.dropFrame || smpteSettings.dropFrame });
       }
       const effectiveFps = smpteSettings.fpsAuto ? mapped : smpteSettings.fps;
-      setElapsedMs((timecodeToFrames(tc.raw, effectiveFps) / nominalFps(effectiveFps)) * 1000);
-      const active = resolveActiveCue(tc, cues, effectiveFps);
+      const drop = tc.dropFrame || smpteSettings.dropFrame;
+      setElapsedMs((timecodeToFrames(tc.raw, effectiveFps, drop) / trueFps(effectiveFps)) * 1000);
+      const active = resolveActiveCue(tc, cues, effectiveFps, drop);
       if (active && active.id !== lastCueRef.current) {
         lastCueRef.current = active.id;
         dispatch({
@@ -1346,7 +1346,13 @@ export default function ConsolePage({
             onSync={() => void toggleSync()}
             onFps={(auto, nextFps) => {
               if (auto) updateSmpteSettings({ fpsAuto: true });
-              else if (nextFps) updateSmpteSettings({ fpsAuto: false, fps: nextFps });
+              else if (nextFps) {
+                updateSmpteSettings({
+                  fpsAuto: false,
+                  fps: nextFps,
+                  dropFrame: supportsDropFrame(nextFps) ? smpteSettings.dropFrame : false,
+                });
+              }
             }}
             onTimeline={() => setTimelineOpen((v) => !v)}
             onSyncMode={(mode) => {

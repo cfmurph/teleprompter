@@ -57,7 +57,9 @@ export type LTCCallback = (tc: LTCTimecode) => void;
 const SYNC_WORD = 0b0011111111111101;
 
 /** Detect frame rate from the number of frames decoded per second */
-const KNOWN_FPS = [24, 25, 29, 30];
+const KNOWN_FPS = [24, 25, 29, 30, 48, 50, 59, 60];
+
+export const SMPTE_RATES: SmpteFps[] = [23.98, 24, 25, 29.97, 30, 47.95, 48, 50, 59.94, 60];
 
 function nearestFps(fps: number): number {
   return KNOWN_FPS.reduce((best, f) =>
@@ -66,10 +68,9 @@ function nearestFps(fps: number): number {
 }
 
 export function detectedToSmpteFps(fps: number): SmpteFps {
-  if (fps === 24) return 24;
-  if (fps === 25) return 25;
-  if (fps === 29 || fps === 29.97) return 29.97;
-  return 30;
+  return SMPTE_RATES.reduce((best, f) =>
+    Math.abs(f - fps) < Math.abs(best - fps) ? f : best
+  );
 }
 
 // ─── AudioWorklet processor code (runs in audio thread) ─────────────────────
@@ -281,8 +282,67 @@ export class LTCDecoder {
 
 // ─── SMPTE Cue ────────────────────────────────────────────────────────────────
 
+/** Integer address rate used in the time address (ST 12-1). */
 export function nominalFps(fps: SmpteFps): number {
-  return fps === 29.97 ? 30 : fps;
+  if (fps === 23.98) return 24;
+  if (fps === 29.97) return 30;
+  if (fps === 47.95) return 48;
+  if (fps === 59.94) return 60;
+  return fps;
+}
+
+/** Actual frames per second of real time (NTSC-related rates are n/1.001). */
+export function trueFps(fps: SmpteFps): number {
+  if (fps === 23.98) return 24 / 1.001;
+  if (fps === 29.97) return 30 / 1.001;
+  if (fps === 47.95) return 48 / 1.001;
+  if (fps === 59.94) return 60 / 1.001;
+  return fps;
+}
+
+/** Drop-frame compensation exists only for 30/1.001 and 60/1.001 systems. */
+export function supportsDropFrame(fps: SmpteFps): boolean {
+  return fps === 29.97 || fps === 59.94;
+}
+
+function dropFramesPerMinute(fps: SmpteFps): number {
+  if (fps === 29.97) return 2;
+  if (fps === 59.94) return 4;
+  return 0;
+}
+
+function usesDropFrame(fps: SmpteFps, dropFrame: boolean): boolean {
+  return dropFrame && supportsDropFrame(fps);
+}
+
+/** Convert a DF time address into a monotonic frame index (ST 12-1 §5.2.2). */
+function dropAddressToFrames(
+  hours: number,
+  minutes: number,
+  seconds: number,
+  frames: number,
+  fps: SmpteFps
+): number {
+  const rate = nominalFps(fps);
+  const drop = dropFramesPerMinute(fps);
+  const totalMinutes = hours * 60 + minutes;
+  return (hours * 3600 + minutes * 60 + seconds) * rate + frames - drop * (totalMinutes - Math.floor(totalMinutes / 10));
+}
+
+/** Convert a monotonic frame index into a DF time address (ST 12-1 §5.2.2). */
+function framesToDropAddress(frameNumber: number, fps: SmpteFps): number {
+  const rate = nominalFps(fps);
+  const drop = dropFramesPerMinute(fps);
+  const framesPer10Min = rate * 600 - drop * 9;
+  const framesPerFirstMin = rate * 60;
+  const framesPerMin = rate * 60 - drop;
+  const tenMinBlocks = Math.floor(frameNumber / framesPer10Min);
+  const remainder = frameNumber % framesPer10Min;
+  const extraDrops =
+    remainder < framesPerFirstMin
+      ? 0
+      : drop + drop * Math.floor((remainder - framesPerFirstMin) / framesPerMin);
+  return frameNumber + tenMinBlocks * 9 * drop + extraDrops;
 }
 
 export function parseTimecode(tc: string): { hours: number; minutes: number; seconds: number; frames: number } {
@@ -304,19 +364,25 @@ export function formatSmpte(hours: number, minutes: number, seconds: number, fra
   ].join(":") + sep + String(frames).padStart(2, "0");
 }
 
-export function timecodeToFrames(tc: string, fps: SmpteFps): number {
+export function timecodeToFrames(tc: string, fps: SmpteFps, dropFrame = false): number {
   const { hours, minutes, seconds, frames } = parseTimecode(tc);
-  return ((hours * 3600 + minutes * 60 + seconds) * nominalFps(fps) + frames);
+  if (usesDropFrame(fps, dropFrame) || (supportsDropFrame(fps) && tc.includes(";"))) {
+    return dropAddressToFrames(hours, minutes, seconds, frames, fps);
+  }
+  return (hours * 3600 + minutes * 60 + seconds) * nominalFps(fps) + frames;
 }
 
 export function framesToTimecode(total: number, fps: SmpteFps, dropFrame = false): string {
   const rate = nominalFps(fps);
-  const frames = Math.max(0, Math.floor(total)) % rate;
-  const totalSec = Math.floor(Math.max(0, total) / rate);
+  const useDf = usesDropFrame(fps, dropFrame);
+  let n = Math.max(0, Math.floor(total));
+  if (useDf) n = framesToDropAddress(n, fps);
+  const frames = n % rate;
+  const totalSec = Math.floor(n / rate);
   const hours = Math.floor(totalSec / 3600);
   const minutes = Math.floor((totalSec % 3600) / 60);
   const seconds = totalSec % 60;
-  return formatSmpte(hours, minutes, seconds, frames, dropFrame);
+  return formatSmpte(hours, minutes, seconds, frames, useDf);
 }
 
 /**
@@ -332,18 +398,23 @@ export function timecodeToSeconds(tc: string): number {
  * Returns the last cue whose timecode is <= current timecode.
  */
 export function resolveActiveCue(
-  tc: { hours: number; minutes: number; seconds: number; frames: number; raw?: string },
+  tc: { hours: number; minutes: number; seconds: number; frames: number; raw?: string; dropFrame?: boolean },
   cues: SmpteCue[],
-  fps: SmpteFps = 30
+  fps: SmpteFps = 30,
+  dropFrame = false
 ): SmpteCue | null {
+  const df = dropFrame || !!tc.dropFrame;
   const current = timecodeToFrames(
-    tc.raw ?? formatSmpte(tc.hours, tc.minutes, tc.seconds, tc.frames),
-    fps
+    tc.raw ?? formatSmpte(tc.hours, tc.minutes, tc.seconds, tc.frames, df),
+    fps,
+    df
   );
-  const sorted = [...cues].sort((a, b) => timecodeToFrames(a.timecode, fps) - timecodeToFrames(b.timecode, fps));
+  const sorted = [...cues].sort(
+    (a, b) => timecodeToFrames(a.timecode, fps, df) - timecodeToFrames(b.timecode, fps, df)
+  );
   let active: SmpteCue | null = null;
   for (const cue of sorted) {
-    if (timecodeToFrames(cue.timecode, fps) <= current) active = cue;
+    if (timecodeToFrames(cue.timecode, fps, df) <= current) active = cue;
     else break;
   }
   return active;

@@ -1,5 +1,5 @@
 import type { Script, Setlist, SongSync, SmpteFps } from "./types";
-import { framesToTimecode, nominalFps, parseTimecode, timecodeToFrames } from "./ltc-decoder";
+import { framesToTimecode, parseTimecode, timecodeToFrames, trueFps } from "./ltc-decoder";
 
 export function countLyricLines(script: Script): number {
   return script.sections.reduce((n, sec) => {
@@ -94,8 +94,8 @@ export function clockFromElapsed(
   fps: SmpteFps,
   dropFrame: boolean
 ): string {
-  const start = timecodeToFrames(smpteStart, fps);
-  const extra = Math.floor((Math.max(0, elapsedMs) / 1000) * nominalFps(fps));
+  const start = timecodeToFrames(smpteStart, fps, dropFrame);
+  const extra = Math.floor((Math.max(0, elapsedMs) / 1000) * trueFps(fps));
   return framesToTimecode(start + extra, fps, dropFrame);
 }
 

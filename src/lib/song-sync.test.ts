@@ -222,7 +222,7 @@ describe("clockFromElapsed", () => {
   });
 
   it("uses a semicolon for drop-frame clocks", () => {
-    expect(clockFromElapsed(1_000, "00:00:00:00", 29.97, true)).toBe("00:00:01;00");
+    expect(clockFromElapsed(1_000, "00:00:00:00", 29.97, true)).toBe("00:00:00;29");
   });
 
   it("does not run backwards for negative elapsed", () => {
@@ -395,10 +395,11 @@ describe("applyDurationInput", () => {
 });
 
 describe("clockFromElapsed fps and frames", () => {
-  it("advances one second at 24, 25, and 29.97 nominal rates", () => {
+  it("advances one second at integer rates and true 29.97", () => {
     expect(clockFromElapsed(1_000, "00:00:00:00", 24, false)).toBe("00:00:01:00");
     expect(clockFromElapsed(1_000, "00:00:00:00", 25, false)).toBe("00:00:01:00");
-    expect(clockFromElapsed(1_000, "00:00:00:00", 29.97, false)).toBe("00:00:01:00");
+    expect(clockFromElapsed(1_000, "00:00:00:00", 29.97, false)).toBe("00:00:00:29");
+    expect(clockFromElapsed(1_000, "00:00:00:00", 59.94, false)).toBe("00:00:00:59");
   });
 
   it("stays on the same frame until a full frame of elapsed time", () => {
@@ -410,8 +411,9 @@ describe("clockFromElapsed fps and frames", () => {
     expect(clockFromElapsed(1_000 / 30, "01:00:00:29", 30, false)).toBe("01:00:01:00");
   });
 
-  it("does not apply true drop-frame skipped-frame math", () => {
-    expect(clockFromElapsed(60_000, "00:00:00:00", 29.97, true)).toBe("00:01:00;00");
+  it("applies ST 12-1 drop-frame counting against real 29.97 time", () => {
+    expect(clockFromElapsed(60_000, "00:00:00:00", 29.97, true)).toBe("00:00:59;28");
+    expect(clockFromElapsed(3_600_000, "00:00:00:00", 29.97, true)).toBe("01:00:00;00");
   });
 
   it("can emit hours beyond two digits", () => {

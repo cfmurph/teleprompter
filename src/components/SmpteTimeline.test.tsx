@@ -47,6 +47,7 @@ describe("SmpteTimeline", () => {
     );
     expect(screen.getByText(/No cues on this song/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Add Cue/ })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "DF" })).toHaveProperty("disabled", true);
   });
 
   it("sorts cues, jumps, edits, deletes, and toggles drop-frame", () => {
@@ -59,7 +60,7 @@ describe("SmpteTimeline", () => {
       <SmpteTimeline
         script={script}
         cues={cues}
-        fps={30}
+        fps={29.97}
         dropFrame={false}
         currentSectionIndex={0}
         liveTc="00:00:05:00"

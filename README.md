@@ -53,7 +53,7 @@ Edit sync on the setlist **Song sync** panel, the transport **Time** field, or t
 
 ### SMPTE
 
-Switch the transport to **SMPTE** for FPS, drop-frame display, cue timeline, and optional LTC from a line-in / mic. Cues fire `GOTO_LINE` when their timecode is reached. Drop-frame currently changes the separator (`;`) only; frame math uses the nominal rate (29.97 → 30).
+Switch the transport to **SMPTE** for FPS, drop-frame counting, cue timeline, and optional LTC from a line-in / mic. Rates follow ST 12-1: 23.98, 24, 25, 29.97, 30, 47.95, 48, 50, 59.94, and 60. Cues fire `GOTO_LINE` when their timecode is reached. Drop-frame (29.97 / 59.94) skips frame numbers 00–01 (or 00–03 at 59.94) at the start of each minute except 00, 10, 20, 30, 40, and 50, and displays `HH:MM:SS;FF`.
 
 ## Tests
 

@@ -48,7 +48,7 @@ export interface Script {
   durationMs?: number; // Expected song length; clock and lyric mapping use this
 }
 
-export type SmpteFps = 24 | 25 | 29.97 | 30;
+export type SmpteFps = 23.98 | 24 | 25 | 29.97 | 30 | 47.95 | 48 | 50 | 59.94 | 60;
 
 export interface SmpteCue {
   id: string;

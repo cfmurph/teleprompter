@@ -6,14 +6,23 @@ import {
   nominalFps,
   parseTimecode,
   resolveActiveCue,
+  supportsDropFrame,
   timecodeToFrames,
   timecodeToSeconds,
+  trueFps,
 } from "./ltc-decoder";
 
 describe("timecode helpers", () => {
-  it("treats 29.97 as 30 fps for frame math", () => {
+  it("maps NTSC-related rates to their integer address rates", () => {
+    expect(nominalFps(23.98)).toBe(24);
     expect(nominalFps(29.97)).toBe(30);
+    expect(nominalFps(47.95)).toBe(48);
+    expect(nominalFps(59.94)).toBe(60);
     expect(nominalFps(24)).toBe(24);
+    expect(trueFps(29.97)).toBeCloseTo(30 / 1.001);
+    expect(supportsDropFrame(29.97)).toBe(true);
+    expect(supportsDropFrame(59.94)).toBe(true);
+    expect(supportsDropFrame(24)).toBe(false);
   });
 
   it("parses colon and drop-frame separators", () => {
@@ -47,10 +56,49 @@ describe("timecode helpers", () => {
 
   it("maps detected frame rates onto SMPTE fps", () => {
     expect(detectedToSmpteFps(24)).toBe(24);
+    expect(detectedToSmpteFps(23.98)).toBe(23.98);
     expect(detectedToSmpteFps(29)).toBe(29.97);
     expect(detectedToSmpteFps(29.97)).toBe(29.97);
     expect(detectedToSmpteFps(30)).toBe(30);
-    expect(detectedToSmpteFps(60)).toBe(30);
+    expect(detectedToSmpteFps(48)).toBe(48);
+    expect(detectedToSmpteFps(50)).toBe(50);
+    expect(detectedToSmpteFps(59.94)).toBe(59.94);
+    expect(detectedToSmpteFps(60)).toBe(60);
+  });
+});
+
+describe("ST 12-1 drop-frame", () => {
+  it("skips :00 and :01 at the start of each minute except every 10th", () => {
+    expect(framesToTimecode(1799, 29.97, true)).toBe("00:00:59;29");
+    expect(framesToTimecode(1800, 29.97, true)).toBe("00:01:00;02");
+    expect(timecodeToFrames("00:01:00;02", 29.97, true)).toBe(1800);
+  });
+
+  it("does not skip numbers at 00, 10, 20, 30, 40, 50", () => {
+    expect(framesToTimecode(17982, 29.97, true)).toBe("00:10:00;00");
+    expect(timecodeToFrames("00:10:00;00", 29.97, true)).toBe(17982);
+  });
+
+  it("lands on 01:00:00;00 after one hour of 29.97 frames", () => {
+    expect(framesToTimecode(107892, 29.97, true)).toBe("01:00:00;00");
+    expect(timecodeToFrames("01:00:00;00", 29.97, true)).toBe(107892);
+  });
+
+  it("drops four frame numbers per minute at 59.94", () => {
+    expect(framesToTimecode(3599, 59.94, true)).toBe("00:00:59;59");
+    expect(framesToTimecode(3600, 59.94, true)).toBe("00:01:00;04");
+    expect(timecodeToFrames("00:01:00;04", 59.94, true)).toBe(3600);
+  });
+
+  it("round-trips DF addresses at 29.97", () => {
+    for (const tc of ["00:00:00;00", "00:00:59;29", "00:01:00;02", "00:09:59;29", "00:10:00;00", "01:00:00;00"]) {
+      expect(framesToTimecode(timecodeToFrames(tc, 29.97, true), 29.97, true)).toBe(tc);
+    }
+  });
+
+  it("ignores the DF flag at integer frame rates", () => {
+    expect(framesToTimecode(30, 30, true)).toBe("00:00:01:00");
+    expect(timecodeToFrames("00:01:00:00", 24, true)).toBe(1440);
   });
 });
 
