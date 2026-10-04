@@ -12,6 +12,7 @@ import { useStore } from "@/lib/store";
 import { useBroadcastReceiver } from "@/lib/broadcast";
 import { applyGotoLine, applySmpteLock } from "@/lib/console-commands";
 import { parseContent } from "@/lib/chord-utils";
+import type { ColorScheme, ConsoleCommand } from "@/lib/types";
 
 // ─── Color schemes ────────────────────────────────────────────────────────────
 

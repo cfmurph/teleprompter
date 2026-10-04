@@ -66,3 +66,7 @@ npm test
 ## Stack
 
 Next.js 16 (App Router), React 19, Zustand, Tailwind CSS 4, Yjs, Vitest.
+
+## License
+
+[MIT](LICENSE)

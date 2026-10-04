@@ -7,11 +7,11 @@ export type PersistedSlice = {
 };
 
 export function mergePersistedState<T extends PersistedSlice>(
-  persisted: Partial<T> | undefined,
+  persisted: Partial<PersistedSlice> | undefined,
   current: T,
   seed: { demoScripts: Script[]; demoSetlist: Setlist }
 ): T {
-  const p = persisted ?? {};
+  const p: Partial<PersistedSlice> = persisted ?? {};
   const scripts = { ...current.scripts, ...(p.scripts ?? {}) };
   const setlists = { ...current.setlists, ...(p.setlists ?? {}) };
   const demoId = seed.demoSetlist.id;
