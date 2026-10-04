@@ -110,7 +110,7 @@ function BevelBtn({
     <button
       type="button"
       onClick={onClick}
-      className={`h-7 px-2 text-[11px] leading-none rounded-sm border shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] ${
+      className={`h-11 px-3 text-[14px] leading-none rounded-sm border shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] ${
         active
           ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
           : "bg-[#5c5c5c] border-[#6e6e6e] text-zinc-100 hover:bg-[#6a6a6a]"
@@ -373,26 +373,24 @@ function PreviewStage({
             {script.title}
           </p>
           <div className="w-full max-w-3xl space-y-1">
-            {lines.map((line, i) => (
-              <div key={i} className="flex items-center justify-center gap-4 min-h-[1.2em]">
-                <span
-                  className="w-0 text-white text-lg shrink-0 -ml-8"
-                  style={{ opacity: i === lineIndex ? 1 : 0 }}
-                >
-                  ▶
-                </span>
-                <p
-                  className="text-white leading-snug"
-                  style={{
-                    fontSize,
-                    lineHeight: lineSpacing,
-                    opacity: Math.abs(i - lineIndex) > 3 ? 0.35 : 1,
-                  }}
-                >
-                  {line || "\u00A0"}
-                </p>
-              </div>
-            ))}
+            {lines.map((line, i) => {
+              const isCurrent = i === lineIndex;
+              return (
+                <div key={i} className="flex items-center justify-center min-h-[1.2em]">
+                  <p
+                    className="leading-snug"
+                    style={{
+                      fontSize,
+                      lineHeight: lineSpacing,
+                      color: isCurrent ? "#facc15" : "#ffffff",
+                      opacity: isCurrent || Math.abs(i - lineIndex) <= 3 ? 1 : 0.35,
+                    }}
+                  >
+                    {line || "\u00A0"}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -496,18 +494,18 @@ function TransportDeck({
   return (
     <div className="shrink-0 bg-[#3f3f3f] border-t border-black/40 px-3 py-2 space-y-2">
       <div className="flex items-center gap-2">
-        <BevelBtn active={syncMode === "bpm"} onClick={() => onSyncMode("bpm")} className="h-8 px-3 font-semibold">
+        <BevelBtn active={syncMode === "bpm"} onClick={() => onSyncMode("bpm")} className="h-11 px-3 font-semibold">
           BPM
         </BevelBtn>
-        <BevelBtn active={syncMode === "smpte"} onClick={() => onSyncMode("smpte")} className="h-8 px-3 font-semibold">
+        <BevelBtn active={syncMode === "smpte"} onClick={() => onSyncMode("smpte")} className="h-11 px-3 font-semibold">
           SMPTE
         </BevelBtn>
         {syncMode === "bpm" ? (
-          <div className="flex-1 bg-[#2a2a2a] border border-black/50 rounded-sm h-8 flex items-center gap-1.5 px-2 min-w-0">
+          <div className="flex-1 bg-[#2a2a2a] border border-black/50 rounded-sm h-11 flex items-center gap-1.5 px-2 min-w-0">
             <button
               type="button"
               onClick={() => onBpm(bpm - 1)}
-              className="h-5 w-5 text-[12px] text-zinc-300 hover:text-white"
+              className="h-6 w-6 text-[14px] text-zinc-300 hover:text-white"
               aria-label="Decrease BPM"
             >
               −
@@ -518,12 +516,12 @@ function TransportDeck({
               max={300}
               value={bpm}
               onChange={(e) => onBpm(parseInt(e.target.value, 10) || bpm)}
-              className="w-12 h-6 bg-[#1a1a1a] border border-black/50 rounded-sm text-center font-mono text-[13px] text-white select-text focus:outline-none focus:border-[#3d7ad1]"
+              className="w-12 h-7 bg-[#1a1a1a] border border-black/50 rounded-sm text-center font-mono text-[13px] text-white select-text focus:outline-none focus:border-[#3d7ad1]"
             />
             <button
               type="button"
               onClick={() => onBpm(bpm + 1)}
-              className="h-5 w-5 text-[12px] text-zinc-300 hover:text-white"
+              className="h-6 w-6 text-[14px] text-zinc-300 hover:text-white"
               aria-label="Increase BPM"
             >
               +
@@ -531,7 +529,7 @@ function TransportDeck({
             <button
               type="button"
               onClick={onTap}
-              className="h-5 px-2 text-[10px] rounded-sm border bg-[#5c5c5c] border-[#6e6e6e] text-zinc-100 hover:bg-[#6a6a6a]"
+              className="h-6 px-2 text-[11px] rounded-sm border bg-[#5c5c5c] border-[#6e6e6e] text-zinc-100 hover:bg-[#6a6a6a]"
             >
               Tap
             </button>
@@ -549,7 +547,7 @@ function TransportDeck({
                 key={v}
                 type="button"
                 onClick={() => onLinesPerBeat(v)}
-                className={`h-5 px-1.5 text-[10px] rounded-sm border ${
+                className={`h-6 px-1.5 text-[11px] rounded-sm border ${
                   linesPerBeat === v
                     ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
                     : "border-transparent text-zinc-500 hover:text-zinc-200"
@@ -561,10 +559,10 @@ function TransportDeck({
           </div>
         ) : (
           <>
-            <BevelBtn active={syncOn} onClick={onSync} className="h-8 px-4 font-semibold">
+            <BevelBtn active={syncOn} onClick={onSync} className="h-11 px-4 font-semibold">
               Sync
             </BevelBtn>
-            <div className="flex-1 bg-[#2a2a2a] border border-black/50 rounded-sm h-8 flex items-center gap-2 px-2 min-w-0">
+            <div className="flex-1 bg-[#2a2a2a] border border-black/50 rounded-sm h-11 flex items-center gap-2 px-2 min-w-0">
               <div className="flex items-center gap-0.5 shrink-0">
                 <span className="text-[10px] text-zinc-500 mr-0.5">FPS</span>
                 {FPS_CHIPS.map((chip) => {
@@ -574,7 +572,7 @@ function TransportDeck({
                       key={chip.label}
                       type="button"
                       onClick={() => onFps(chip.fpsAuto, chip.fps)}
-                      className={`h-5 px-1.5 text-[10px] rounded-sm border ${
+                      className={`h-6 px-1.5 text-[11px] rounded-sm border ${
                         active
                           ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
                           : "border-transparent text-zinc-500 hover:text-zinc-200"
@@ -595,7 +593,7 @@ function TransportDeck({
               <button
                 type="button"
                 onClick={onTimeline}
-                className={`shrink-0 h-5 px-2 text-[10px] rounded-sm border ${
+                className={`shrink-0 h-6 px-2 text-[11px] rounded-sm border ${
                   timelineOpen
                     ? "bg-[#1e5aa8] border-[#3d7ad1] text-white"
                     : "border-transparent text-zinc-500 hover:text-zinc-200"
@@ -643,9 +641,9 @@ function TransportDeck({
         <button
           type="button"
           onClick={onTogglePlay}
-          className="h-[72px] w-[140px] rounded-sm bg-[#5c5c5c] border border-[#6e6e6e] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] text-white hover:bg-[#6a6a6a]"
+          className="h-[88px] w-[160px] rounded-sm bg-[#5c5c5c] border border-[#6e6e6e] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] text-white hover:bg-[#6a6a6a]"
         >
-          <div className="text-[22px] font-semibold leading-none">{isPlaying ? "Pause" : "Start"}</div>
+          <div className="text-[26px] font-semibold leading-none">{isPlaying ? "Pause" : "Start"}</div>
           <div className={`text-[11px] mt-1 font-mono tabular-nums ${isPlaying ? "text-green-400" : "text-zinc-300"}`}>
             {displayTc}
           </div>
@@ -659,23 +657,23 @@ function TransportDeck({
       </div>
 
       <div className="flex items-center gap-1.5">
-        <BevelBtn onClick={onFooter} className="h-8 px-3 leading-tight">
+        <BevelBtn onClick={onFooter} className="h-11 px-3 leading-tight">
           <div>Footer</div>
-          <div className="text-[9px] text-zinc-300">{footerHidden ? "Hidden" : "Shown"}</div>
+          <div className="text-[10px] text-zinc-300">{footerHidden ? "Hidden" : "Shown"}</div>
         </BevelBtn>
-        <BevelBtn className="h-8 px-3 leading-tight">
+        <BevelBtn className="h-11 px-3 leading-tight">
           <div>Elapsed</div>
-          <div className={`text-[9px] font-mono ${isPlaying ? "text-green-300" : "text-zinc-300"}`}>{displayTc}</div>
+          <div className={`text-[10px] font-mono ${isPlaying ? "text-green-300" : "text-zinc-300"}`}>{displayTc}</div>
         </BevelBtn>
-        <BevelBtn onClick={onBlanking} className="h-8 px-3 leading-tight">
+        <BevelBtn onClick={onBlanking} className="h-11 px-3 leading-tight">
           <div>Blanking</div>
-          <div className="text-[9px] text-zinc-300">{blanking ? "On" : "Off"}</div>
+          <div className="text-[10px] text-zinc-300">{blanking ? "On" : "Off"}</div>
         </BevelBtn>
         <div className="flex-1" />
-        <BevelBtn active={layer === "A"} onClick={() => onLayer("A")} className="h-8 w-8 px-0 font-semibold">A</BevelBtn>
-        <BevelBtn active={layer === "B"} onClick={() => onLayer("B")} className="h-8 w-8 px-0 font-semibold">B</BevelBtn>
-        <BevelBtn onClick={onMonitor} className="h-8 px-3">Monitor</BevelBtn>
-        <BevelBtn active={standBy} onClick={onStandBy} className="h-8 px-3">Stand By</BevelBtn>
+        <BevelBtn active={layer === "A"} onClick={() => onLayer("A")} className="h-11 w-11 px-0 font-semibold">A</BevelBtn>
+        <BevelBtn active={layer === "B"} onClick={() => onLayer("B")} className="h-11 w-11 px-0 font-semibold">B</BevelBtn>
+        <BevelBtn onClick={onMonitor} className="h-11 px-3">Monitor</BevelBtn>
+        <BevelBtn active={standBy} onClick={onStandBy} className="h-11 px-3">Stand By</BevelBtn>
       </div>
     </div>
   );
